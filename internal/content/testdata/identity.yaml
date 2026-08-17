@@ -1,0 +1,20 @@
+name: Test Person
+role:
+  title: Test Engineer
+  company: Test Co
+  program: Test Program S00
+education:
+  institution: Test University
+  degree: BS in Testing
+  start_year: 2020
+  end_year: 2024
+taglines:
+  - "First tagline."
+  - "Second tagline."
+skills:
+  languages:
+    - Go
+  frameworks:
+    - Bubble Tea
+  tools:
+    - Git

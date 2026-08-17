@@ -1,0 +1,13 @@
+.DS_Store
+
+# Private planning tracker and source material (resume, headshot); never shipped.
+.scratch/
+
+# Build output.
+/bin/
+
+# Runtime host key, generated on first run.
+/.ssh/
+
+# Content pack sections are fetched artifacts; run `make content`.
+internal/content/pack/*.yaml
