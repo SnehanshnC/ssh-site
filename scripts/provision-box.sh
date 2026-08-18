@@ -286,6 +286,24 @@ wait_for_box() {
   return 1
 }
 
+# wait_until_22_free TRIES - poll until sshd has actually let go of port 22.
+# Checking before that races the restart: the old daemon is still up, still
+# listening on both ports, and every check run against it lies. An ssh failure
+# mid-restart yields no answer at all, which keeps waiting rather than reading
+# as success.
+wait_until_22_free() {
+  local tries="$1" i=1 state
+  while [ "$i" -le "$tries" ]; do
+    state="$(box "$ADMIN_PORT" 'if ss -ltnH "sport = :22" | grep -q .; then echo BUSY; else echo FREE; fi' 2>/dev/null || true)"
+    if [ "$state" = "FREE" ]; then return 0; fi
+    printf '  %s· waiting for sshd to let go of port 22 (%s/%s)%s\n' \
+      "$DIM" "$i" "$tries" "$RESET"
+    sleep 3
+    i=$((i + 1))
+  done
+  return 1
+}
+
 resolve_a() {
   if command -v dig >/dev/null 2>&1; then
     dig +short "$1" A 2>/dev/null | grep -E '^[0-9.]+$' | head -1 || true
@@ -300,44 +318,83 @@ resolve_a() {
 # for it is not a plan. Each rung is a whole box that works; the one taken is
 # recorded, because slice 12 builds for whatever architecture it lands on.
 
+# oracle_prep - the network, built once and before the instance. Both Oracle
+# rungs need it.
+oracle_prep() {
+  step "Build the network first, unless you already have a VCN with a public"
+  say  "  subnet:"
+  say  "    Networking -> Virtual cloud networks -> Start VCN Wizard ->"
+  say  "    Create VCN with Internet Connectivity -> name it ssh-site-vcn ->"
+  say  "    accept every default -> Create."
+  note "Doing it here rather than inline in the instance form is deliberate. The"
+  note "form's own 'Create new virtual cloud network' path leaves the public"
+  note "IPv4 toggle greyed out, and that toggle is what gives the box an address."
+}
+
+# oracle_form - the create-instance form, which the console lays out as five
+# numbered sections. Identical on both Oracle rungs bar the shape and image.
+oracle_form() {
+  step "1 Basic information:"
+  say  "    Name: ssh-site"
+  say  "    Placement: read the warning box above the availability domains. It"
+  say  "      names which shapes each AD can currently build - worth reading"
+  say  "      before you pick, not after."
+  say  "    Image: Change image -> Canonical Ubuntu -> 24.04. It defaults to"
+  say  "      Oracle Linux, which the later stages of this wizard do not speak:"
+  say  "      they expect apt, netfilter-persistent and the ubuntu login user."
+  say  "    Shape: $1"
+  step "2 Security: leave every default."
+  step "3 Networking:"
+  say  "    Select existing virtual cloud network -> ssh-site-vcn"
+  say  "    Select existing subnet -> the one with public in its name"
+  say  "    Automatically assign public IPv4 address -> ON"
+  say  "    Add SSH keys -> Paste public key -> paste the key from stage 2."
+  say  "      This defaults to 'Generate a key pair for me', which would hand"
+  say  "      you a different key than the one every later stage connects with."
+  step "4 Storage: leave the default boot volume size."
+  step "Review, then Create."
+  printf '\n'
+  note "The Review page's Estimated cost quotes list price - its own small print"
+  note "says it ignores tier pricing. A default boot volume sits well inside the"
+  note "200 GB of block storage Always Free covers."
+}
+
 attempt_oracle_a1() {
   rung_header "Create the instance - rung 1 of 3: Oracle A1.Flex"
   say "The shape the spec asks for: 1 OCPU and 6 GB, Always Free, in Ashburn."
   open_url "https://cloud.oracle.com/compute/instances"
   step "Check the region selector at the top right reads US East (Ashburn)."
-  step "Click Create instance."
-  step "Name it ssh-site."
-  step "Placement: leave the default availability domain for now."
-  step "Image and shape: Change image, pick Canonical Ubuntu 24.04."
-  step "Then Change shape: Virtual machine, Ampere, VM.Standard.A1.Flex,"
-  say  "  1 OCPU and 6 GB of memory."
-  step "Check the shape card says Always Free eligible before going on."
-  step "Networking: create a new VCN with its defaults, in a public subnet,"
-  say  "  and leave Assign a public IPv4 address on."
-  step "Add SSH keys: Paste public keys, and paste the key from stage 2."
-  step "Boot volume: leave the default size."
-  step "Click Create."
-  note "If the console has moved things: https://docs.oracle.com/en-us/iaas/Content/Compute/Tasks/launchinginstance.htm"
   printf '\n'
-  say "If it refuses with 'Out of host capacity' or 'Out of capacity for shape':"
-  step "try the other two availability domains, once each"
-  step "then stop and answer no below. Rung 2 is a working box, not a consolation."
+  oracle_prep
+  printf '\n'
+  oracle_form "Change shape -> Virtual machine -> Ampere -> VM.Standard.A1.Flex,
+      1 OCPU and 6 GB. The card must say Always Free-eligible."
+  note "Docs: https://docs.oracle.com/en-us/iaas/Content/Compute/Tasks/launchinginstance.htm"
+  printf '\n'
+  say "If Create refuses with 'Out of capacity for shape ... in availability"
+  say "domain', that is A1 being full, not anything you did:"
+  step "go back to 1 Basic information, pick another AD, Create again"
+  step "having tried all three, answer no below. Rung 2 is a working box, not"
+  say  "  a consolation, and waiting for A1 capacity is not a plan."
 }
 
 attempt_oracle_e2() {
   rung_header "Create the instance - rung 2 of 3: Oracle E2.1.Micro"
-  say "Same account, same console, same Always Free tier. Two fields change."
+  say "Same account, same console, same Always Free tier, same form."
   open_url "https://cloud.oracle.com/compute/instances"
-  step "Create instance, named ssh-site, as before."
-  step "Change shape: VM.Standard.E2.1.Micro. It sits under AMD, or under"
-  say  "  Specialty and previous generation if it is not there."
-  step "Change image: Canonical Ubuntu 24.04, the x86_64 build."
-  step "Everything else is identical: new VCN with defaults, public IPv4 on,"
-  say  "  paste the same public key, default boot volume, Create."
   printf '\n'
-  note "1/8 OCPU and 1 GB of memory rather than 1 OCPU and 6 GB. A text TUI"
-  note "does not notice. It is x86_64 rather than arm64, which is the one thing"
-  note "downstream cares about, and this wizard records it."
+  oracle_prep
+  printf '\n'
+  oracle_form "Change shape -> VM.Standard.E2.1.Micro. It sits under AMD, or
+      under Specialty and previous generation. Then RE-CHECK the image: A1 is
+      arm64 and E2 is x86_64, so changing shape invalidates the image you
+      picked and the form falls back to its default."
+  printf '\n'
+  note "1 GB of memory rather than 6, and 0.48 Gbps rather than 1. A text TUI"
+  note "does not notice either. It is x86_64 rather than arm64, which is the one"
+  note "thing downstream cares about, and this wizard records it."
+  note "E2.1.Micro is often offered in only one availability domain - the"
+  note "placement warning box names which."
 }
 
 attempt_gcp() {
@@ -772,13 +829,23 @@ then
   die "could not drop port 22; sshd is unchanged and still on both ports"
 fi
 printf '\n'
+# Wait for the restart to land before believing anything. A session on
+# $ADMIN_PORT proves nothing on its own here - the old daemon answered there
+# too - so the signal to wait on is port 22 going quiet.
+if ! wait_until_22_free 20; then
+  fail "sshd is still listening on port 22"
+  note "The admin port works, so nothing is lost - but the app server cannot"
+  note "bind 22 until this is resolved. Check /etc/ssh/sshd_config.d/ on the box"
+  note "for a second Port line, and systemctl status ssh."
+  die "port 22 did not come free"
+fi
 if ! wait_for_box "$ADMIN_PORT" 12; then
   fail "lost the admin port during the restart"
   note "Recover from the cloud console's serial or VNC connection, or rebuild:"
   note "delete the instance and run this wizard again from the top."
   die "sshd did not come back on $ADMIN_PORT"
 fi
-ok "still signed in on $ADMIN_PORT after the restart"
+ok "sshd let go of port 22 and still answers on $ADMIN_PORT"
 printf '\n'
 remote "$ADMIN_PORT" "$ADMIN_PORT" <<'EOS'
 set -eu
