@@ -192,6 +192,100 @@ func (f *frame) settle(blocks [][]string, rows int, selectable bool) {
 	f.scroll = min(max(f.scroll, 0), max(len(flat)-rows, 0))
 }
 
+// --- the body idioms every section draws in ---
+//
+// The chrome above is one frame around every page; these are the shapes that
+// go inside it. They live here rather than in any one section because a list
+// row that lines up with every other list row, and a bullet that hangs the same
+// way on every page, are what make five sections read as one surface.
+
+const (
+	// markerCols is the column a list's cursor marker sits in, held on every
+	// row so that selecting one does not shift the text beside it.
+	markerCols = 2
+	// nameGap is the air between a list's name column and the descriptions
+	// beside it.
+	nameGap = 2
+
+	// bodyIndent is the step a detail page sets its own contents in by, under
+	// the labels that name them.
+	bodyIndent = 2
+	// subIndent is the step a list row's second line sits at: past the marker
+	// column and past the name it hangs under.
+	subIndent = 4
+	// bulletHang is the width of a bullet's marker, and so the hanging indent
+	// that lines a wrapped item up under its own first word rather than under
+	// the marker.
+	bulletHang = 2
+)
+
+// count is the derived note beside a section's title. Every one of them is a
+// count of the pack's own entries - the plural is the only thing written here,
+// and it is asked for because it is not always the singular plus an s.
+func count(n int, one, many string) string {
+	if n == 1 {
+		return "1 " + one
+	}
+	return strconv.Itoa(n) + " " + many
+}
+
+// nameColumn is how wide a list's name column is at a body width: the widest
+// name plus the gap, capped at half the row so that one long name cannot push
+// every description off the screen.
+func nameColumn(names []string, width int) int {
+	widest := 0
+	for _, name := range names {
+		widest = max(widest, ansi.Width(name))
+	}
+	return min(widest+nameGap, max((width-markerCols)/2, 12))
+}
+
+// listRow draws one row of a section's index: the marker column, the name
+// padded out to the column every name shares, and what is said about the entry
+// beside it. A column of zero is a list with nothing to say beside its names,
+// whose names then run to their own length.
+func listRow(width int, selected bool, name, about string, column int) string {
+	body := max(width-markerCols, 1)
+	if column > 0 {
+		// The name is clipped short of its column so the gap survives the clip
+		// and a shortened name never runs into what follows it.
+		name = pad(clip(name, max(column-nameGap, 1)), column)
+		about = clip(about, max(body-column, 0))
+	} else {
+		name, about = clip(name, body), ""
+	}
+	if selected {
+		return paint(markerState, "▸ "+name) + paint(textState, about)
+	}
+	return "  " + paint(textState, name) + paint(dimState, about)
+}
+
+// bodyLine is one row of a body: text in one state, set in from the body's left
+// edge and shortened to what is left of the row.
+func bodyLine(state ansi.State, text string, by, width int) string {
+	return strings.Repeat(" ", by) + paint(state, clip(text, max(width-by, 0)))
+}
+
+// indentRows sets already-composed rows in from the body's left edge. It
+// returns rows of its own rather than writing into the ones it was handed, so
+// that indenting something twice cannot quietly deepen the original.
+func indentRows(rows []string, by int) []string {
+	out := make([]string, len(rows))
+	for i, row := range rows {
+		out[i] = strings.Repeat(" ", by) + row
+	}
+	return out
+}
+
+// bullets is one item of a detail page's list, wrapped into the rows it renders
+// as. The marker is wrapped along with the text rather than pasted in front of
+// it, so that the first line ends at the same column as every line after it and
+// the text of all of them starts at the same one.
+func bullets(text string, width int) []string {
+	item := paint(accentState, "- ") + paint(textState, text)
+	return indentRows(wrapHanging(item, max(width-bodyIndent, 1), bulletHang), bodyIndent)
+}
+
 // hints is the dim row along the bottom: what the keys do here, and where in
 // the page the visitor is. Parts are dropped from the right until the row fits,
 // rather than the row being cut, so a narrow terminal loses whole hints instead

@@ -32,17 +32,38 @@ type Model struct {
 	help  bool
 }
 
-// jumpKeys are the letters that open a section from anywhere, `h` included:
-// hobbies has no seat on the card's six-item nav row, which was signed off as
-// six, so the key is its only way in and the help overlay is where it is
-// advertised.
+// sectionKeys are the letters that open a section from anywhere, in the order
+// the card's nav row names them and with `h` on the end: hobbies has no seat on
+// that row, which was signed off as six items, so the key is its only way in
+// and the help overlay is where it is advertised.
+var sectionKeys = []string{"w", "p", "a", "l", "h"}
+
+// typedSections maps a letter to the page its own build slice wrote for it.
+//
+// A section is typed by one slice: that slice adds its opener here and deletes
+// the section's row from the stub table in section.go, so there is one way in
+// to a section rather than two. Everything not named here still falls through
+// to the stub, and when the last entry lands section.go goes away.
+var typedSections = map[string]func(*content.Pack) Page{
+	"w": openWork,
+}
+
 var jumpKeys = func() map[string]bool {
-	keys := make(map[string]bool, len(sections))
-	for _, sec := range sections {
-		keys[sec.key] = true
+	keys := make(map[string]bool, len(sectionKeys))
+	for _, key := range sectionKeys {
+		keys[key] = true
 	}
 	return keys
 }()
+
+// openSection returns the page a letter jump or a nav item opens, or nil where
+// the letter opens nothing.
+func openSection(pack *content.Pack, key string) Page {
+	if open, ok := typedSections[key]; ok {
+		return open(pack)
+	}
+	return openStub(pack, key)
+}
 
 // New builds a Model from the loaded content pack and the session's initial
 // PTY window size.

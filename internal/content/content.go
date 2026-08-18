@@ -18,12 +18,13 @@ var packFS embed.FS
 // keyed by their name without the .yaml extension.
 var sections = []string{"identity", "work", "projects", "links", "hobbies"}
 
-// Pack is the parsed content pack consumed by the TUI. Identity and Links are
-// typed and ready to use; the remaining sections are kept as raw YAML bytes for
-// later build issues to parse as their own shapes take form.
+// Pack is the parsed content pack consumed by the TUI. A section is typed by
+// the build slice that builds its page; the sections whose slices have not
+// landed yet are kept as raw YAML bytes until they do.
 type Pack struct {
 	Identity Identity
 	Links    []Link
+	Work     []Job
 
 	raw map[string][]byte
 }
@@ -45,6 +46,43 @@ func (p *Pack) Link(slug string) (Link, bool) {
 		}
 	}
 	return Link{}, false
+}
+
+// NamedLinks is the links block an entry of another section carries: that
+// entry's own links, in the order the pack wrote them.
+//
+// The pack writes the block as a mapping keyed by a permanent name, and a name
+// holds either one link or a list of them - fraxai has two repos under `code`.
+// Reading both shapes is done here, once, rather than at each of the section
+// slices that meets one. The key is the slug, and a link that carries no label
+// of its own is shown under its key, so a name is always something to read.
+type NamedLinks []Link
+
+// UnmarshalYAML walks the mapping in the order the document wrote it, which is
+// the order the pages show; decoding into a Go map would lose it.
+func (l *NamedLinks) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("links at line %d: want a mapping of names to links", node.Line)
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		slug, value := node.Content[i].Value, node.Content[i+1]
+		items := []*yaml.Node{value}
+		if value.Kind == yaml.SequenceNode {
+			items = value.Content
+		}
+		for _, item := range items {
+			var link Link
+			if err := item.Decode(&link); err != nil {
+				return fmt.Errorf("link %s: %w", slug, err)
+			}
+			link.Slug = slug
+			if link.Label == "" {
+				link.Label = slug
+			}
+			*l = append(*l, link)
+		}
+	}
+	return nil
 }
 
 // Identity is the person's identity section of the content pack: their name,
@@ -105,7 +143,12 @@ func Load() (*Pack, error) {
 		return nil, err
 	}
 
-	return &Pack{Identity: identity, Links: links, raw: raw}, nil
+	work, err := parseWork(raw["work"])
+	if err != nil {
+		return nil, err
+	}
+
+	return &Pack{Identity: identity, Links: links, Work: work, raw: raw}, nil
 }
 
 // parseIdentity parses raw identity.yaml bytes into an Identity. It is
@@ -133,7 +176,8 @@ func parseLinks(b []byte) ([]Link, error) {
 }
 
 // Raw returns the unparsed YAML bytes for the named section (identity, work,
-// projects, links, or hobbies). It returns nil for an unknown section.
+// projects, links, or hobbies), for the sections whose own slice has not typed
+// them yet. It returns nil for an unknown section.
 func (p *Pack) Raw(section string) []byte {
 	return p.raw[section]
 }

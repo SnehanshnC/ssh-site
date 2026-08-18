@@ -3,6 +3,7 @@ package content
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -91,5 +92,97 @@ func TestParseLinks(t *testing.T) {
 	}
 	if _, ok := pack.Link("nope"); ok {
 		t.Error("Link(\"nope\") found something")
+	}
+}
+
+// TestParseWork exercises work parsing against its own testdata fixture, for
+// the same reason the two above do: the fetched pack is gitignored and only
+// present after `make content`.
+func TestParseWork(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("testdata", "work.yaml"))
+	if err != nil {
+		t.Fatalf("read testdata fixture: %v", err)
+	}
+
+	work, err := parseWork(b)
+	if err != nil {
+		t.Fatalf("parseWork: %v", err)
+	}
+	if got, want := len(work), 2; got != want {
+		t.Fatalf("parsed %d roles, want %d", got, want)
+	}
+
+	first := work[0]
+	if got, want := first.Company, "Acme Corp"; got != want {
+		t.Errorf("Company = %q, want %q", got, want)
+	}
+	if got, want := first.Role, "Test Engineer"; got != want {
+		t.Errorf("Role = %q, want %q", got, want)
+	}
+	if got, want := first.Location, "Testville, TS / Remote"; got != want {
+		t.Errorf("Location = %q, want %q", got, want)
+	}
+	// A role still held writes no end date at all, so the absence is the fact
+	// and the surface is what has a word for it.
+	if got, want := first.Start, "2024-01"; got != want {
+		t.Errorf("Start = %q, want %q", got, want)
+	}
+	if first.End != "" {
+		t.Errorf("End = %q for an open-ended role, want it empty", first.End)
+	}
+	if got, want := len(first.Highlights), 2; got != want {
+		t.Errorf("parsed %d highlights, want %d", got, want)
+	}
+	if got, want := work[1].End, "2023-12"; got != want {
+		t.Errorf("End = %q, want %q", got, want)
+	}
+	if got, want := work[1].Project, "base-thing"; got != want {
+		t.Errorf("Project = %q, want %q", got, want)
+	}
+}
+
+// TestNamedLinksReadBothShapes is the finding a prototype round cost: a name in
+// an entry's links block holds either one link or a list of them. Both are read
+// into the same flat, ordered list, keyed by the name, and a link with no label
+// of its own is shown under that name rather than under nothing.
+func TestNamedLinksReadBothShapes(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("testdata", "work.yaml"))
+	if err != nil {
+		t.Fatalf("read testdata fixture: %v", err)
+	}
+	work, err := parseWork(b)
+	if err != nil {
+		t.Fatalf("parseWork: %v", err)
+	}
+
+	want := []Link{
+		{Slug: "code", Label: "first repo", URL: "https://example.com/acme/one"},
+		{Slug: "code", Label: "code", URL: "https://example.com/acme/two"},
+		{Slug: "write_up", Label: "Write-up", URL: "https://example.com/acme/writeup"},
+	}
+	got := work[0].Links
+	if len(got) != len(want) {
+		t.Fatalf("parsed %d links, want %d: %+v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("link %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+	if work[1].Links != nil {
+		t.Errorf("a role with no links block parsed %+v", work[1].Links)
+	}
+}
+
+// TestNamedLinksRejectAnythingButAMapping: the block is keyed by permanent
+// names, and a pack that wrote it as a bare list has lost them, so it fails
+// loudly at load rather than rendering a section with no names in it.
+func TestNamedLinksRejectAnythingButAMapping(t *testing.T) {
+	_, err := parseWork([]byte("work:\n  - slug: x\n    links:\n      - url: https://example.com\n"))
+	if err == nil {
+		t.Fatal("a links block written as a list parsed without complaint")
+	}
+	if !strings.Contains(err.Error(), "mapping") {
+		t.Errorf("the error is %q, want it to say what shape was wanted", err)
 	}
 }

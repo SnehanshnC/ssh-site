@@ -1,0 +1,28 @@
+work:
+  - slug: acme
+    company: Acme Corp
+    role: Test Engineer
+    start: "2024-01"
+    end: null
+    location: Testville, TS / Remote
+    highlights:
+      - Wrote a non-blocking test that proves the wrap never splits a word on its own hyphen.
+      - Wrote a second one.
+    links:
+      code:
+        - label: first repo
+          url: https://example.com/acme/one
+        - url: https://example.com/acme/two
+      write_up:
+        label: Write-up
+        url: https://example.com/acme/writeup
+
+  - slug: base
+    company: Base Ltd
+    role: Test Intern
+    start: "2023-01"
+    end: "2023-12"
+    location: Baseville, BS
+    highlights:
+      - Wrote nothing worth counting.
+    project: base-thing

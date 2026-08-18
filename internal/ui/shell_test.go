@@ -296,15 +296,17 @@ func TestResizeKeepsTheVisitorWhereTheyWere(t *testing.T) {
 
 // TestPageChrome checks the frame every section page is drawn in.
 func TestPageChrome(t *testing.T) {
-	rows := plainRows(screen(press(press(shell(t, 80, 24), "w"), "enter")))
+	m := press(press(shell(t, 80, 24), "w"), "enter")
+	rows := plainRows(screen(m))
 	margin := pageMargin(80)
 	cols, _ := pageBody(80, 24)
 
 	if got := strings.TrimSpace(rows[0]); got != "" {
 		t.Errorf("the page opens on %q, want a blank row", got)
 	}
-	if !strings.HasSuffix(strings.TrimRight(rows[pageTitleRow], " "), "role") {
-		t.Errorf("the title row %q carries no dim note", rows[pageTitleRow])
+	suffix := m.stack[len(m.stack)-1].page.Chrome().Suffix
+	if !strings.HasSuffix(strings.TrimRight(rows[pageTitleRow], " "), suffix) {
+		t.Errorf("the title row %q does not end on its dim note %q", rows[pageTitleRow], suffix)
 	}
 	if crumb := strings.TrimSpace(rows[pageCrumbRow]); !strings.HasPrefix(crumb, "home / work / ") {
 		t.Errorf("the breadcrumb is %q, want it to start at home", crumb)

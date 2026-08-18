@@ -1,28 +1,27 @@
 package ui
 
 import (
-	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/SnehanshnC/ssh-site/internal/ansi"
 	"github.com/SnehanshnC/ssh-site/internal/content"
 )
 
 // The stub section page.
 //
-// This slice builds the navigation, not the sections: the real work, projects,
-// awards, links and hobbies pages are five slices of their own, each of which
+// The navigation shell built the stack, not the sections: the real projects,
+// awards, links and hobbies pages are four slices of their own, each of which
 // types its own part of the content pack and designs its own screen. What is
-// here is the one page shape those five replace - a list that drills into a
-// detail - reading the pack generically so that it shows real facts rather than
+// here is the page shape those four replace - a list that drills into a detail
+// - reading the pack generically so that it shows real facts rather than
 // invented ones while it stands in for them.
 //
-// Everything below dies with the section slices. The generic pack reading in
-// particular is scaffolding: the pack's sections are deliberately untyped
-// outside identity and links, and typing one is the first thing each section
-// slice does.
+// Work has already gone: openSection routes `w` to the typed pages in work.go
+// and this file lost its entry for it, which is the trade each section slice
+// makes. When the last of the four lands, this file goes with it - the generic
+// pack reading above all, which exists only because a section that no slice has
+// typed yet has no shape to read it into.
 
 // section is one destination the card's nav row and the letter jumps open.
 type section struct {
@@ -34,21 +33,12 @@ type section struct {
 	many string // and what more than one is called, which is not always one+s
 }
 
-var sections = []section{
-	{"w", "work", "work", "work", "role", "roles"},
+var stubSections = []section{
 	{"p", "projects", "projects", "projects", "project", "projects"},
 	{"a", "awards", "projects", "awards", "award", "awards"},
 	{"l", "links", "links", "links", "link", "links"},
 	{"h", "hobbies", "hobbies", "hobbies", "hobby", "hobbies"},
 }
-
-const (
-	// markerCols is the column the cursor's marker sits in, held on every row
-	// so that selecting one does not shift the text beside it.
-	markerCols = 2
-	// nameGap is the air between the name column and the descriptions beside it.
-	nameGap = 2
-)
 
 // The fields an entry is named and described by, best first. Sections do not
 // share a schema, so the page takes the first field an entry actually carries
@@ -61,9 +51,9 @@ var (
 	aboutFields = []string{"role", "summary", "placement", "selection", "detail", "blurb"}
 )
 
-// openSection returns the page a letter jump or a nav item opens.
-func openSection(pack *content.Pack, key string) Page {
-	for _, sec := range sections {
+// openStub returns the stand-in page for a section no slice has typed yet.
+func openStub(pack *content.Pack, key string) Page {
+	for _, sec := range stubSections {
 		if sec.key == key {
 			return listPage{section: sec, entries: readEntries(pack, sec)}
 		}
@@ -94,37 +84,26 @@ func (p listPage) Key(key string, cursor int) (Action, Page) {
 	return Ignored, nil
 }
 
-// Blocks lays each entry out as one row, the cursor's carrying a marker.
+// Blocks lays each entry out as one row, in the shared list idiom. The name
+// column exists to line the descriptions up under each other, so a section with
+// nothing to say beside its names asks for no column at all.
 func (p listPage) Blocks(width, cursor int) [][]string {
-	// The name column exists to line the descriptions up under each other, so a
-	// section with nothing to say beside its names has no column at all and its
-	// names run to their own length. Where there is one it is the widest name
-	// plus a gap, capped at half the row so a single long name cannot push
-	// every description off the screen.
-	widest, described := 0, false
-	for _, e := range p.entries {
-		widest = max(widest, ansi.Width(e.first(nameFields)))
+	names, described := make([]string, len(p.entries)), false
+	for i, e := range p.entries {
+		names[i] = e.first(nameFields)
 		described = described || e.first(aboutFields) != ""
 	}
-	body := max(width-markerCols, 1)
-	names := min(widest+nameGap, max(body/2, 12))
+	column := 0
+	if described {
+		column = nameColumn(names, width)
+	}
 
 	blocks := make([][]string, 0, len(p.entries))
 	for i, e := range p.entries {
-		name, about := e.first(nameFields), ""
-		if described {
-			// The name is clipped short of its column so the gap survives the
-			// clip and a shortened name never runs into what follows it.
-			name = pad(clip(name, names-nameGap), names)
-			about = clip(e.first(aboutFields), max(body-names, 0))
-		} else {
-			name = clip(name, body)
-		}
-		row := "  " + paint(textState, name) + paint(dimState, about)
-		if i == cursor {
-			row = paint(markerState, "▸ "+name) + paint(textState, about)
-		}
-		blocks = append(blocks, []string{row, ""})
+		blocks = append(blocks, []string{
+			listRow(width, i == cursor, names[i], e.first(aboutFields), column),
+			"",
+		})
 	}
 	return blocks
 }
@@ -155,30 +134,15 @@ func (p detailPage) Blocks(width, _ int) [][]string {
 		}
 		rows := []string{paint(dimState, f.name)}
 		if f.value != "" {
-			for _, line := range wrap(paint(textState, f.value), width-2) {
-				rows = append(rows, "  "+line)
-			}
+			rows = append(rows, indentRows(
+				wrap(paint(textState, f.value), max(width-bodyIndent, 1)), bodyIndent)...)
 		}
 		for _, item := range f.values {
-			// The hanging indent is the width of the bullet, so a wrapped item
-			// lines up under its own first word rather than under the marker.
-			for i, line := range wrapHanging(paint(textState, item), width-2, 2) {
-				if i == 0 {
-					line = paint(accentState, "- ") + line
-				}
-				rows = append(rows, "  "+line)
-			}
+			rows = append(rows, bullets(item, width)...)
 		}
 		blocks = append(blocks, append(rows, ""))
 	}
 	return blocks
-}
-
-func count(n int, one, many string) string {
-	if n == 1 {
-		return "1 " + one
-	}
-	return strconv.Itoa(n) + " " + many
 }
 
 // --- reading the pack generically ---
