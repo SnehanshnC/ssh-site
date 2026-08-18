@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/SnehanshnC/ssh-site/internal/art"
 	"github.com/SnehanshnC/ssh-site/internal/content"
 )
 
@@ -176,7 +177,7 @@ func TestAnAwardNamingNoProjectIsListedAndOpensNothing(t *testing.T) {
 	broken := *pack
 	broken.Awards = []content.Award{orphan, pack.Awards[0]}
 
-	list := press(New(&broken, 200, 120), "a")
+	list := press(New(&broken, art.Quad, 200, 120), "a")
 	if got := list.stack[0].page.Chrome().Suffix; got != "2 awards" {
 		t.Errorf("the broken pack is noted as %q, want both awards counted", got)
 	}

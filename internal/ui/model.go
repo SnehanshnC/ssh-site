@@ -5,6 +5,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/SnehanshnC/ssh-site/internal/ansi"
+	"github.com/SnehanshnC/ssh-site/internal/art"
 	"github.com/SnehanshnC/ssh-site/internal/content"
 )
 
@@ -26,6 +27,12 @@ type Model struct {
 	pack   *content.Pack
 	width  int
 	height int
+
+	// tier is the rung of the render ladder this visitor's terminal earned,
+	// decided once from the session environment before the model was built.
+	// It is a property of the session and never of the window, so unlike width
+	// and height it does not move for the life of the session.
+	tier art.Tier
 
 	stack []frame
 	nav   int
@@ -79,10 +86,10 @@ func openSection(pack *content.Pack, key string) Page {
 	return nil
 }
 
-// New builds a Model from the loaded content pack and the session's initial
-// PTY window size.
-func New(pack *content.Pack, width, height int) Model {
-	return Model{pack: pack, width: width, height: height}
+// New builds a Model from the loaded content pack, the render tier the
+// session's terminal earned, and its initial PTY window size.
+func New(pack *content.Pack, tier art.Tier, width, height int) Model {
+	return Model{pack: pack, tier: tier, width: width, height: height}
 }
 
 // Init implements tea.Model. It starts the idle timer: arrival counts as
@@ -174,7 +181,7 @@ func (m Model) jump(key string) Model {
 // on. The row it moves along is the one the card actually drew at this size,
 // which is five items on the restack and six on the two-column card.
 func (m Model) cardKey(key string) (tea.Model, tea.Cmd) {
-	items := cardNav(m.pack, m.width, m.height)
+	items := cardNav(m.pack, m.tier, m.width, m.height)
 	if len(items) == 0 {
 		return m, nil
 	}
@@ -307,7 +314,7 @@ func fork(stack []frame) []frame {
 // It bounds and never resets: a window that grew leaves everything where it
 // was, and a window that shrank moves only what no longer fits.
 func (m *Model) resettle() {
-	if items := cardNav(m.pack, m.width, m.height); len(items) > 0 {
+	if items := cardNav(m.pack, m.tier, m.width, m.height); len(items) > 0 {
 		m.nav = min(max(m.nav, 0), len(items)-1)
 	}
 	cols, rows := pageBody(m.width, m.height)
@@ -343,7 +350,7 @@ func (m Model) screen() string {
 		cv = ansi.NewCanvas(max(m.width-chromeCol, 0), m.height)
 		drawPlea(cv)
 	case len(m.stack) == 0:
-		cv, _ = fitCard(m.pack, m.width, m.height, m.nav)
+		cv, _ = card{m.pack, m.tier}.fit(m.width, m.height, m.nav)
 	default:
 		cv = ansi.NewCanvas(m.width-chromeCol, m.height)
 		renderPage(cv, m.stack[len(m.stack)-1], m.width, m.height)

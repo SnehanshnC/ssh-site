@@ -75,10 +75,20 @@ const (
 	linksOffset     = 12
 )
 
-// Card composes the arrival screen for a terminal of the given size, with the
-// nav row's live item at index live.
-func Card(pack *content.Pack, width, height, live int) string {
-	cv, _ := fitCard(pack, width, height, live)
+// card is one visitor's arrival screen: the facts every visitor sees, and the
+// rung of the render ladder this visitor's terminal earned. The two travel
+// together because every layout below draws a portrait, and by the time the
+// layout ladder runs, which portrait that is has already been settled from the
+// session environment - see internal/capability.
+type card struct {
+	pack *content.Pack
+	tier art.Tier
+}
+
+// Card composes the arrival screen for a terminal of the given size and render
+// tier, with the nav row's live item at index live.
+func Card(pack *content.Pack, tier art.Tier, width, height, live int) string {
+	cv, _ := card{pack, tier}.fit(width, height, live)
 	return cv.Render()
 }
 
@@ -86,12 +96,12 @@ func Card(pack *content.Pack, width, height, live int) string {
 // to know how far the highlight can travel and what pressing enter over it
 // means, and it has to come from the layout ladder rather than from the width
 // alone, because which legend is drawn is decided by which card fits.
-func cardNav(pack *content.Pack, width, height int) []navItem {
-	_, nav := fitCard(pack, width, height, -1)
+func cardNav(pack *content.Pack, tier art.Tier, width, height int) []navItem {
+	_, nav := card{pack, tier}.fit(width, height, -1)
 	return nav
 }
 
-// fitCard draws the first layout that fits and reports the legend it drew.
+// fit draws the first layout that fits and reports the legend it drew.
 //
 // Each layout gets a fresh canvas and is taken only if it drew everything it
 // wanted to. A layout that would have to clip is not a narrower card, it is a
@@ -99,17 +109,22 @@ func cardNav(pack *content.Pack, width, height int) []navItem {
 // about which keys work - so it is rejected and the next, smaller layout is
 // tried instead. The canvas is one column short of the terminal at every size:
 // that is the chrome column, reserved before the art is offered any of it.
-func fitCard(pack *content.Pack, width, height, live int) (*ansi.Canvas, []navItem) {
+//
+// The tier never enters this decision. Every tier of one size occupies the same
+// cell budget, so which card fits is settled by the visitor's window alone and
+// two visitors at the same size get the same composition however different
+// their terminals are.
+func (c card) fit(width, height, live int) (*ansi.Canvas, []navItem) {
 	for _, layout := range []struct {
 		nav  []navItem
-		draw func(*ansi.Canvas, *content.Pack, int) bool
+		draw func(*ansi.Canvas, int) bool
 	}{
-		{navFull, drawWide},
-		{navNarrow, drawNarrow},
-		{navNarrow, drawCompact},
+		{navFull, c.drawWide},
+		{navNarrow, c.drawNarrow},
+		{navNarrow, c.drawCompact},
 	} {
 		cv := ansi.NewCanvas(max(width-chromeCol, 0), height)
-		if layout.draw(cv, pack, live) && !cv.Clipped() {
+		if layout.draw(cv, live) && !cv.Clipped() {
 			return cv, layout.nav
 		}
 	}
@@ -122,7 +137,7 @@ func fitCard(pack *content.Pack, width, height, live int) (*ansi.Canvas, []navIt
 // the nav row and for every copy line to find a form that fits beside the
 // portrait; the widest copy line is what decides the floor, and with a link
 // that cannot shorten any further that floor is 71 columns of art.
-func drawWide(cv *ansi.Canvas, pack *content.Pack, live int) bool {
+func (c card) drawWide(cv *ansi.Canvas, live int) bool {
 	if cv.Rows() < cardRows {
 		return false
 	}
@@ -131,15 +146,15 @@ func drawWide(cv *ansi.Canvas, pack *content.Pack, live int) bool {
 		return false
 	}
 	copyW := cardW - copyCol
-	text, ok := composeCopy(pack, copyW)
+	text, ok := composeCopy(c.pack, copyW)
 	if !ok {
 		return false
 	}
 
 	ox, oy := (cv.Cols()-cardW)/2, (cv.Rows()-cardRows)/2
-	banner := art.Banner()
+	banner := art.Banner(c.tier)
 	cv.Put(ox+(cardW-ansi.BlockWidth(banner))/2, oy+bannerRow, banner)
-	cv.Put(ox+faceCol, oy+faceRow, art.Portrait(art.Wide))
+	cv.Put(ox+faceCol, oy+faceRow, art.Portrait(art.Wide, c.tier))
 
 	// The copy column's rule is a parameter, not art. Between 71 and 77 columns
 	// of art it is the only thing that would overflow, so it shortens and the
@@ -170,7 +185,7 @@ func drawCopyColumn(cv *ansi.Canvas, x, top int, text cardCopy, rules int) {
 // What it drops, and why: the two-column split, because 32 columns of disc plus
 // a 36-column copy column is 68 before any gutter; the quest line and the
 // links, which have nowhere to go; and `[?] help` from the nav.
-func drawNarrow(cv *ansi.Canvas, pack *content.Pack, live int) bool {
+func (c card) drawNarrow(cv *ansi.Canvas, live int) bool {
 	if cv.Rows() < cardRows || cv.Cols() < minArt {
 		return false
 	}
@@ -178,11 +193,11 @@ func drawNarrow(cv *ansi.Canvas, pack *content.Pack, live int) bool {
 	if cardW < navWidth(navNarrow, navNarrowGap) {
 		return false
 	}
-	role, ok := pick(roleForms(pack.Identity), cardW)
+	role, ok := pick(roleForms(c.pack.Identity), cardW)
 	if !ok {
 		return false
 	}
-	school, ok := pick(schoolForms(pack.Identity), cardW)
+	school, ok := pick(schoolForms(c.pack.Identity), cardW)
 	if !ok {
 		return false
 	}
@@ -191,8 +206,8 @@ func drawNarrow(cv *ansi.Canvas, pack *content.Pack, live int) bool {
 	center := func(row int, block []string) {
 		cv.Put(ox+(cardW-ansi.BlockWidth(block))/2, oy+row, block)
 	}
-	center(bannerRow, art.Banner())
-	center(narrowFace, art.Portrait(art.Narrow))
+	center(bannerRow, art.Banner(c.tier))
+	center(narrowFace, art.Portrait(art.Narrow, c.tier))
 	center(narrowRole, []string{paint(textState, role)})
 	center(narrowSchool, []string{paint(textState, school)})
 	center(liveRow, []string{navRow(navNarrow, navNarrowGap, live)})
@@ -202,12 +217,12 @@ func drawNarrow(cv *ansi.Canvas, pack *content.Pack, live int) bool {
 // drawCompact drops the art entirely. It is what a terminal wide enough for the
 // card but too short for it gets - between 20 and 22 rows there is no portrait
 // that fits, and the facts are worth more than the picture.
-func drawCompact(cv *ansi.Canvas, pack *content.Pack, live int) bool {
+func (c card) drawCompact(cv *ansi.Canvas, live int) bool {
 	if cv.Cols() < minArt || cv.Rows() < minRows {
 		return false
 	}
 	cardW := min(cv.Cols(), narrowCols)
-	text, ok := composeCopy(pack, cardW)
+	text, ok := composeCopy(c.pack, cardW)
 	if !ok {
 		return false
 	}
@@ -220,7 +235,7 @@ func drawCompact(cv *ansi.Canvas, pack *content.Pack, live int) bool {
 	block = append(block, text.links...)
 	block = append(block, "", navRow(navNarrow, navNarrowGap, live))
 
-	banner := art.Banner()
+	banner := art.Banner(c.tier)
 	if cv.Rows() >= len(block)+art.BannerRows+1 {
 		block = append(append(append([]string{}, banner...), ""), block...)
 	}

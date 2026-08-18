@@ -32,11 +32,40 @@ make art ART_HEADSHOT=/path/to/headshot.jpg
 | asset | size | what it is |
 | --- | --- | --- |
 | `banner.ans` | 46x4 | figlet `smslant`, cyan-violet horizontal gradient |
-| `portrait-wide-quad.ans` | 36x18 | the disc for the two-column card |
-| `portrait-narrow-quad.ans` | 32x16 | the disc for the vertical restack |
+| `banner-colorless.ans` | 46x4 | the same wordmark with figlet's own strokes, for the bottom rung |
+| `portrait-{wide,narrow}-sextant.ans` | 36x18, 32x16 | 2x3 pixels per cell |
+| `portrait-{wide,narrow}-quad.ans` | 36x18, 32x16 | 2x2 pixels per cell |
+| `portrait-{wide,narrow}-vhalf.ans` | 36x18, 32x16 | 1x2 pixels per cell |
+| `portrait-{wide,narrow}-colorless.ans` | 36x18, 32x16 | the hand-drawn line art |
 
-The tier is `quad` (2x2 pixels per cell), the mainstream default.
-The rest of the render ladder - sextant, vertical half-blocks, colorless - is a later slice; `lib/portrait.py` already takes the tier as a parameter.
+The wide portrait is the two-column card's left column; the narrow one is the restack below 71 columns, where height is the binding constraint and a circled face must be `cols x cols/2` or it is an ellipse.
+Every tier of one size occupies the same cell budget: a tier changes how much picture a cell carries, never how many cells the picture takes, so the Go side can decide which card fits before it knows anything about the visitor's terminal.
+
+## The render ladder
+
+Four tiers, best to worst, one per visitor.
+Which one a visitor gets is decided in `internal/capability` from their session environment; this directory only has to produce all four.
+
+**`sextant`, `quad`, `vhalf`** are the same photograph at three subcell resolutions, off the same master through the same pipeline, each sharpened at its own grid.
+All three are truecolor cell renders that paint a foreground *and* a background in every cell, which is what makes them proof against the visitor's own terminal theme.
+
+**`colorless`** is not that photograph with its colour taken away.
+Ticket 04 round 1 already converted the photograph without colour and it read as blurry pixels rather than as a picture; round 2 answered that by drawing the face by hand, and the drawing was kept as an asset for exactly this rung.
+`lib/lineart.py` holds it, and it needs no headshot, no chafa and no ImageMagick - see that file's own docstring for why the prototype's tone-driven hair fill is carried as a comment rather than as code.
+
+The colorless wordmark is the same idea one step up: the shipped `banner.ans` closes figlet's row gaps by swapping each stroke for the box or block glyph that fills a whole cell, and a terminal that reached the bottom rung is one nothing in the session vouched for, so it gets `smslant` as figlet drew it, out of `/ \ | _`.
+
+## Looking at the ladder
+
+```sh
+python3 art/preview.py internal/art/assets/portrait-wide-sextant.ans /tmp/sextant.png
+```
+
+`preview.py` rasterises an asset to a PNG the way a terminal draws it, and for the top of the ladder it is the only way to see the thing at all: sextants live in Unicode 13's Symbols for Legacy Computing and **no font in general circulation carries them**.
+kitty, foot, Ghostty and WezTerm draw them from their own built-in geometry, which is exactly why they are the four terminals that get this tier, and why `cat`ting a sextant asset into any other terminal shows a wall of tofu whether the asset is right or wrong.
+Block glyphs are defined as exact rectangles, so for the cell tiers the preview is not an approximation of the terminal's output, it is the same picture.
+
+Run it on `portrait-*-colorless.ans` and it draws every text glyph as a bar, which is the prototype's own squint test: what is left has to read as a head in profile with a face-shaped void before anything else about the drawing matters.
 
 ## The pipeline
 
@@ -52,15 +81,21 @@ headshot.jpg
   ▼
 master.png (960x960)
   │  ramp the outermost cell and a half toward the fill     lib/master.py
-  │  resize to the mode's subcell grid, sharpen THERE, point-upscale
-  │  chafa -f symbols -c full --symbols quad+space+solid    lib/portrait.py
+  │  resize to the tier's subcell grid, sharpen THERE, point-upscale
+  │  chafa -f symbols -c full --symbols <tier>+space+solid  lib/portrait.py
   │  clip to the disc, draw the Braille ring                lib/disc.py
   ▼
-portrait-*.ans
+portrait-{wide,narrow}-{sextant,quad,vhalf}.ans
+```
+
+The colorless tier does not come down this pipe at all:
+
+```
+lib/lineart.py  ──▶  portrait-{wide,narrow}-colorless.ans
 ```
 
 The shape of the render stage is the point: **we** own every pixel decision and chafa only picks a glyph and two colours.
-The master is resized to exactly the subcell grid the mode can represent, sharpened at that resolution - the only place sharpening does anything, because sharpening the 960px master is averaged away by the downsample - then point-upscaled by an integer factor so chafa's own scaler cannot put the blur back.
+The master is resized to exactly the subcell grid the tier can represent, sharpened at that resolution - the only place sharpening does anything, because sharpening the 960px master is averaged away by the downsample - then point-upscaled by an integer factor so chafa's own scaler cannot put the blur back.
 
 ## Traps
 

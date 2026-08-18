@@ -21,27 +21,35 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from lib import banner, master, portrait   # noqa: E402
+from lib import banner, lineart, master, portrait   # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 ASSETS = os.path.join(REPO, "internal", "art", "assets")
 
-# One portrait per card layout. The wide disc is the two-column card's left
-# column; the narrow one is the restack below 71 columns, where height is the
-# binding constraint and a circled face must be cols x cols/2 or it is an
-# ellipse. The tier is quad, the mainstream default; the rest of the ladder is
-# a later slice.
+# The portrait matrix: one card layout by one render tier.
+#
+# The wide disc is the two-column card's left column; the narrow one is the
+# restack below 71 columns, where height is the binding constraint and a circled
+# face must be cols x cols/2 or it is an ellipse.
+#
+# The tiers are the render ladder, best to worst. The three cell tiers differ
+# only in how many pixels one cell can carry - sextant 2x3, quad 2x2, vhalf 1x2
+# - so all three come off the same master through the same pipeline, and each is
+# sharpened at its own subcell grid. The colorless tier is not that picture
+# without its colour: it is the hand-drawn line art, which is why it comes from
+# `lib/lineart.py` and needs no photograph at all.
+LAYOUTS = [
+    ("wide", 36, 18),
+    ("narrow", 32, 16),
+]
+CELL_TIERS = ["sextant", "quad", "vhalf"]
+
 # The wordmark's text is a fact, so it comes from the content pack rather than
 # from this file - `make content` has to have run. Only the given name goes in
 # the banner: `smslant` renders SNEHANSHN at 46 columns and a full name would
 # not fit the frame at any signed-off size.
 PACK_IDENTITY = os.path.join(REPO, "internal", "content", "pack", "identity.yaml")
-
-PORTRAITS = [
-    ("portrait-wide-quad", 36, 18, "quad"),
-    ("portrait-narrow-quad", 32, 16, "quad"),
-]
 
 
 def wordmark():
@@ -93,14 +101,25 @@ def main():
     text = wordmark()
     print(f"banner ({text}):", file=sys.stderr)
     write("banner", banner.render(text, tiling=touchups))
+    # The colorless tier's wordmark. The row-gap touch-up closes the letterforms
+    # by swapping figlet's strokes for the box and block glyphs that fill a whole
+    # cell, and a terminal that reached the bottom rung is one nothing vouched
+    # for - so it gets `smslant` as figlet drew it, in the same 46x4, out of the
+    # `/ \ | _` that every terminal has drawn since figlet was written. The
+    # gradient is painted on either way and stripped at the writer.
+    write("banner-colorless", banner.render(text, tiling=False))
 
     print("master:", file=sys.stderr)
     src = master.build(a.headshot, os.path.join(a.work, "master.png"),
                        a.work, touchups)
 
-    for name, cols, rows, mode in PORTRAITS:
-        print(f"portrait {name} ({cols}x{rows} {mode}):", file=sys.stderr)
-        write(name, portrait.build(src, cols, rows, mode, a.work, touchups))
+    for layout, cols, rows in LAYOUTS:
+        for tier in CELL_TIERS:
+            print(f"portrait {layout} {tier} ({cols}x{rows}):", file=sys.stderr)
+            write(f"portrait-{layout}-{tier}",
+                  portrait.build(src, cols, rows, tier, a.work, touchups))
+        print(f"portrait {layout} colorless ({cols}x{rows}):", file=sys.stderr)
+        write(f"portrait-{layout}-colorless", lineart.build(cols, rows))
 
 
 if __name__ == "__main__":

@@ -20,6 +20,8 @@ import (
 	recovermw "charm.land/wish/v2/recover"
 	"github.com/charmbracelet/colorprofile"
 
+	"github.com/SnehanshnC/ssh-site/internal/art"
+	"github.com/SnehanshnC/ssh-site/internal/capability"
 	"github.com/SnehanshnC/ssh-site/internal/content"
 	"github.com/SnehanshnC/ssh-site/internal/ui"
 )
@@ -45,26 +47,32 @@ func main() {
 	host := envOrDefault("SSH_SITE_HOST", defaultHost)
 	port := envOrDefault("SSH_SITE_PORT", defaultPort)
 
-	// The card's art is a truecolor cell render: every cell paints both a
-	// foreground and a background, which is what makes it proof against the
-	// visitor's own terminal theme. Left to itself Bubble Tea picks the
-	// profile out of the session environment, and OpenSSH forwards TERM but
-	// not COLORTERM, so a truecolor terminal arrives as plain
-	// `xterm-256color` and the portrait gets quantised to 256 colours - the
-	// one path ticket 04 measured and rejected outright, because 256 colours
-	// on a colour master paints the jaw and neck a saturated red. Truecolor or
-	// grayscale, never 256, so the profile is forced here.
+	// Every session is placed on a rung of the render ladder before its first
+	// frame, from the environment it arrived with: TERM out of the pty-req,
+	// and whatever the client chose to forward. internal/capability owns that
+	// decision and the reasoning behind it; nothing here guesses.
 	//
-	// Establishing the visitor's real capability, and rendering the lower
-	// tiers for terminals that do not have this one, is the render-ladder
-	// slice's job. Until then every session gets the tier the card was signed
-	// off in.
+	// The colour profile follows the tier rather than being detected again.
+	// Left to itself Bubble Tea would pick the profile out of the same
+	// environment and reach a different answer, because OpenSSH forwards TERM
+	// and not COLORTERM, so a truecolor terminal arrives as plain
+	// `xterm-256color` and the portrait would be quantised to 256 colours -
+	// the one path ticket 04 measured and rejected outright, because 256
+	// colours on a colour master paints the jaw and the neck a saturated red.
+	// Truecolor or no colour, never the middle, which is exactly the split the
+	// tier already encodes: the three cell tiers are truecolor renders, and
+	// the bottom rung is a drawing that names no colour at all and is served
+	// under a profile that would strip one if it did.
 	programHandler := func(sess ssh.Session) *tea.Program {
 		pty, _, _ := sess.Pty()
-		m := ui.New(pack, pty.Window.Width, pty.Window.Height)
+		tier := sessionTier(sess)
+		log.Info("session tier", "tier", tier, "term", pty.Term,
+			"remote", sess.RemoteAddr().String())
+
+		m := ui.New(pack, tier, pty.Window.Width, pty.Window.Height)
 		// Appended after MakeOptions so it is the last writer of the profile.
 		opts := append(bubbletea.MakeOptions(sess),
-			tea.WithColorProfile(colorprofile.TrueColor))
+			tea.WithColorProfile(colorProfile(tier)))
 		return tea.NewProgram(m, opts...)
 	}
 
@@ -108,6 +116,34 @@ func main() {
 	if err := srv.Shutdown(ctx); err != nil && !errors.Is(err, ssh.ErrServerClosed) {
 		log.Error("could not stop server gracefully", "error", err)
 	}
+}
+
+// sessionTier reads the two places a visitor's terminal shows up in an SSH
+// session and hands them to the ladder.
+//
+// They arrive by different routes and are not equally trustworthy. TERM rides
+// in the pty-req, which OpenSSH always sends; everything else has to be an
+// explicit `env` request from a client configured to forward it, which almost
+// none are. capability.Detect knows that, and weighs them accordingly.
+func sessionTier(sess ssh.Session) art.Tier {
+	pty, _, _ := sess.Pty()
+	return capability.Detect(pty.Term, sess.Environ())
+}
+
+// colorProfile is the writer profile a tier is served under.
+//
+// It is deliberately not a second detection pass. The bottom rung is reached
+// precisely because nothing in the session vouched for truecolor, so it is
+// served under a profile that strips colour out of everything - not only the
+// portrait, which names none anyway, but the wordmark's gradient and the whole
+// runtime-composed copy column beside it. Attributes survive: the nav row's
+// live item and a list's cursor are bold under this profile rather than
+// coloured, so the visitor can still see what they are on.
+func colorProfile(tier art.Tier) colorprofile.Profile {
+	if tier == art.Colorless {
+		return colorprofile.ASCII
+	}
+	return colorprofile.TrueColor
 }
 
 // documentRouter is D2: a session with an active PTY is sent on to the

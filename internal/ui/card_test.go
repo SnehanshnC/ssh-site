@@ -60,7 +60,7 @@ func realPack(t *testing.T) *content.Pack {
 // wedge, the collar step - all change pixels of the reference on purpose. What
 // must not move is where anything sits.
 func TestCardMatchesTheReferenceGeometry(t *testing.T) {
-	rows := plainRows(Card(realPack(t), 80, 24, noHighlight))
+	rows := plainRows(Card(realPack(t), art.Quad, 80, 24, noHighlight))
 	if len(rows) != 24 {
 		t.Fatalf("card is %d rows, want 24", len(rows))
 	}
@@ -111,7 +111,7 @@ func TestCardMatchesTheReferenceGeometry(t *testing.T) {
 // cell's state is resolved and re-emitted canonically, and megabytes when SGR
 // prefixes are carried forward by concatenation instead.
 func TestScreenIsKilobytesNotMegabytes(t *testing.T) {
-	size := len(Card(realPack(t), 80, 24, noHighlight))
+	size := len(Card(realPack(t), art.Quad, 80, 24, noHighlight))
 	if size < 8*1024 || size > 32*1024 {
 		t.Errorf("a composed screen is %d bytes, want it on the order of 18 KB", size)
 	}
@@ -121,7 +121,7 @@ func TestScreenIsKilobytesNotMegabytes(t *testing.T) {
 // actually matters - the bytes a visitor's terminal receives.
 func TestEverySequenceNamesBothColours(t *testing.T) {
 	sgr := regexp.MustCompile("\x1b\\[([0-9;]*)m")
-	for _, match := range sgr.FindAllStringSubmatch(Card(realPack(t), 80, 24, noHighlight), -1) {
+	for _, match := range sgr.FindAllStringSubmatch(Card(realPack(t), art.Quad, 80, 24, noHighlight), -1) {
 		params := match[1]
 		if params == "0" || params == "" {
 			continue
@@ -142,7 +142,7 @@ func TestFitsEveryTerminalSize(t *testing.T) {
 	pack := fixturePack()
 	for width := 1; width <= 200; width++ {
 		for _, height := range []int{1, 5, 19, 20, 23, 24, 25, 40, 60} {
-			card := Card(pack, width, height, noHighlight)
+			card := Card(pack, art.Quad, width, height, noHighlight)
 			rows := plainRows(card)
 			if len(rows) != height {
 				t.Fatalf("%dx%d: %d rows, want %d", width, height, len(rows), height)
@@ -177,7 +177,7 @@ func TestResponsiveLadder(t *testing.T) {
 		{57, "plea", 0},
 	}
 	for _, tt := range tests {
-		rows := plainRows(Card(pack, tt.width, 24, noHighlight))
+		rows := plainRows(Card(pack, art.Quad, tt.width, 24, noHighlight))
 		if got := layoutOf(rows); got != tt.layout {
 			t.Errorf("%d columns: drew the %s layout, want %s", tt.width, got, tt.layout)
 		}
@@ -204,7 +204,7 @@ func TestHeightLadder(t *testing.T) {
 		{40, "wide"}, {24, "wide"}, {23, "wide"}, {22, "compact"}, {20, "compact"},
 		{19, "plea"},
 	} {
-		if got := layoutOf(plainRows(Card(pack, 80, tt.height, noHighlight))); got != tt.want {
+		if got := layoutOf(plainRows(Card(pack, art.Quad, 80, tt.height, noHighlight))); got != tt.want {
 			t.Errorf("%d rows: drew the %s layout, want %s", tt.height, got, tt.want)
 		}
 	}
@@ -223,7 +223,7 @@ func TestLinksAreNeverTruncated(t *testing.T) {
 
 	found := 0
 	for width := 1; width <= 200; width++ {
-		for _, row := range plainRows(Card(pack, width, 24, noHighlight)) {
+		for _, row := range plainRows(Card(pack, art.Quad, width, 24, noHighlight)) {
 			for _, field := range strings.Fields(row) {
 				if !strings.Contains(field, "test-person") {
 					continue
@@ -241,12 +241,139 @@ func TestLinksAreNeverTruncated(t *testing.T) {
 	}
 }
 
+// TestTheCardDrawsTheTierItIsGiven. The render ladder is only real if it
+// reaches the screen: the card has to draw the portrait for this visitor's
+// tier, at both sizes, and nothing else about the composition may move with it.
+func TestTheCardDrawsTheTierItIsGiven(t *testing.T) {
+	pack := realPack(t)
+	sizes := []struct {
+		name          string
+		size          art.Size
+		width, height int
+	}{
+		{"the two-column card", art.Wide, 80, 24},
+		{"the vertical restack", art.Narrow, 60, 24},
+	}
+	for _, sz := range sizes {
+		t.Run(sz.name, func(t *testing.T) {
+			for _, tier := range art.Tiers {
+				drawn := Card(pack, tier, sz.width, sz.height, noHighlight)
+				want := art.Portrait(sz.size, tier)
+				for _, line := range want {
+					if trimmed := strings.TrimSpace(line); trimmed != "" &&
+						!strings.Contains(drawn, trimmed) {
+						t.Fatalf("the %s card does not carry a row of the %s portrait",
+							tier, tier)
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestOnlyTheArtChangesWithTheTier. The tier decides how much picture a cell
+// carries and never how many cells the picture takes, so swapping rungs must
+// leave the composition alone: the copy column beside the portrait, the nav row
+// under it, and where every one of them sits.
+//
+// Inside the art's own cells the tiers genuinely differ, and deliberately. The
+// three cell renders are clipped to a disc because a photograph needs a frame
+// to stop at, while the drawing keeps its own silhouette; and the bottom rung's
+// wordmark is figlet's strokes rather than the glyphs that close them up. So
+// this checks what surrounds the art; the budget itself is the next test.
+func TestOnlyTheArtChangesWithTheTier(t *testing.T) {
+	pack := realPack(t)
+	var want []string
+	for _, tier := range art.Tiers {
+		outside := aroundTheArt(plainRows(Card(pack, tier, 80, 24, noHighlight)))
+		if want == nil {
+			want = outside
+			continue
+		}
+		for row := range outside {
+			if outside[row] != want[row] {
+				t.Errorf("at the %s tier, row %d outside the art reads\n%q\nwant\n%q",
+					tier, row, outside[row], want[row])
+			}
+		}
+	}
+}
+
+// aroundTheArt blanks the cells the two art assets are allowed to paint - the
+// wordmark's rows, which carry nothing else, and the portrait's column band -
+// leaving every other cell of the card where it was.
+func aroundTheArt(rows []string) []string {
+	out := make([]string, len(rows))
+	for row, line := range rows {
+		runes := []rune(line)
+		switch {
+		case row < art.BannerRows:
+			out[row] = ""
+		case row < faceRow || row >= faceRow+art.WidePortraitRows:
+			out[row] = line
+		default:
+			for col := faceCol; col < faceCol+art.WidePortraitCols && col < len(runes); col++ {
+				runes[col] = ' '
+			}
+			out[row] = string(runes)
+		}
+	}
+	return out
+}
+
+// TestTheColorlessCardIsDrawableAnywhere. The bottom rung is where a terminal
+// lands when nothing in its session vouched for it, so nothing the card puts on
+// screen at that rung may assume more than the oldest terminal has: the
+// portrait is a drawing rather than a photograph, and the wordmark is figlet's
+// own `/ \ | _` rather than the box glyphs that close its row gaps.
+//
+// The colour is not stripped here - that happens at the writer, in cmd - so
+// this is about glyphs alone.
+func TestTheColorlessCardIsDrawableAnywhere(t *testing.T) {
+	pack := realPack(t)
+	for _, row := range plainRows(Card(pack, art.Colorless, 80, 24, noHighlight)) {
+		for col, r := range []rune(row) {
+			// The copy column composes at runtime and draws its own rule; the
+			// art is what this tier is responsible for.
+			if col >= copyCol {
+				continue
+			}
+			if r > '~' {
+				t.Errorf("the colorless card draws %q at column %d, which an "+
+					"old terminal has no glyph for", r, col)
+			}
+		}
+	}
+}
+
+// TestEveryTierStaysInsideThePortraitBudget is the other half of the same
+// promise, from the portrait's side: whatever a tier does with its silhouette,
+// none may put ink outside the 36x18 the layout budgeted - the gutter it would
+// spill into is the only thing keeping it off the copy column at 42.
+func TestEveryTierStaysInsideThePortraitBudget(t *testing.T) {
+	pack := realPack(t)
+	for _, tier := range art.Tiers {
+		rows := plainRows(Card(pack, tier, 80, 24, noHighlight))
+		for row := faceRow; row < faceRow+art.WidePortraitRows; row++ {
+			gutter := []rune(rows[row])[faceCol+art.WidePortraitCols : copyCol]
+			if first, _ := ink(rows[row]); first >= 0 && first < faceCol {
+				t.Errorf("the %s tier puts ink on row %d at column %d, left of the portrait's %d",
+					tier, row, first, faceCol)
+			}
+			if first, _ := ink(string(gutter)); first >= 0 {
+				t.Errorf("the %s tier puts ink on row %d in the gutter between the portrait and the copy column",
+					tier, row)
+			}
+		}
+	}
+}
+
 // TestCopyComesFromThePack: every fact on the card is composed from the pack at
 // render time. Nothing here asserts a string about a person, only that what the
 // pack says arrives on the screen.
 func TestCopyComesFromThePack(t *testing.T) {
 	pack := fixturePack()
-	card := strings.Join(plainRows(Card(pack, 80, 24, noHighlight)), "\n")
+	card := strings.Join(plainRows(Card(pack, art.Quad, 80, 24, noHighlight)), "\n")
 	for _, want := range []string{
 		"Test Engineer",           // role title
 		"TestCo",                  // company

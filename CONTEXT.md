@@ -30,5 +30,11 @@ Never visitor-facing; the only listener on the machine that guards real credenti
 **Address** - the literal string a visitor types after `ssh `.
 Currently `snehanshn.duckdns.org`; swappable without downstream rework beyond copy.
 
+**Render ladder** - the four ways the portrait is drawn, best to worst: sextant, quad, vertical half-blocks, colorless.
+The top three are the same photograph at three subcell resolutions; the bottom one is a hand-drawn line-art portrait, not that photograph with its colour removed.
+
+**Render tier** - the one rung of the ladder a given visitor is served, decided once per session from the environment that session arrives with and never from its window size.
+A property of the visitor's terminal, so unlike the layout it does not change when they resize.
+
 **Visitor** - an anonymous SSH client connecting to the app server.
 Never authenticated, never gated; a presented public key may personalize but never blocks.

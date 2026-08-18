@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/SnehanshnC/ssh-site/internal/ansi"
+	"github.com/SnehanshnC/ssh-site/internal/art"
 )
 
 // TestArrivalIsTheCardWithALiveNavRow. The card is ticket 04's, unchanged
@@ -394,7 +395,7 @@ func TestTooSmallAsksForRoom(t *testing.T) {
 // the row when the window shrinks under it rather than pointing at nothing.
 func TestTheNarrowCardsHighlightStaysOnTheRowItHas(t *testing.T) {
 	m := press(shell(t, 80, 24), "end")
-	if got := len(cardNav(m.pack, 80, 24)); got != len(navFull) {
+	if got := len(cardNav(m.pack, m.tier, 80, 24)); got != len(navFull) {
 		t.Fatalf("the wide card drew %d nav items, want %d", got, len(navFull))
 	}
 	resized, _ := m.Update(tea.WindowSizeMsg{Width: 60, Height: 24})
@@ -436,9 +437,12 @@ func key(name string) tea.KeyPressMsg {
 	return tea.KeyPressMsg{Code: r, Text: string(r)}
 }
 
+// shell builds the model at the tier the card was signed off in. Tests that
+// care about the render ladder name their own tier; every other test in here
+// is about navigation, and navigation is the same at every rung.
 func shell(t *testing.T, width, height int) Model {
 	t.Helper()
-	return New(realPack(t), width, height)
+	return New(realPack(t), art.Quad, width, height)
 }
 
 func screen(m Model) string { return m.View().Content }
