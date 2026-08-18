@@ -18,13 +18,33 @@ var packFS embed.FS
 // keyed by their name without the .yaml extension.
 var sections = []string{"identity", "work", "projects", "links", "hobbies"}
 
-// Pack is the parsed content pack consumed by the TUI. Identity is typed and
-// ready to use; the remaining sections are kept as raw YAML bytes for later
-// build issues to parse as their own shapes take form.
+// Pack is the parsed content pack consumed by the TUI. Identity and Links are
+// typed and ready to use; the remaining sections are kept as raw YAML bytes for
+// later build issues to parse as their own shapes take form.
 type Pack struct {
 	Identity Identity
+	Links    []Link
 
 	raw map[string][]byte
+}
+
+// Link is one entry of the pack's links section: a permanent slug, a display
+// label, and the URL. Surfaces key their display mappings to the slug, never to
+// the label, so rewording a link breaks nothing.
+type Link struct {
+	Slug  string `yaml:"slug"`
+	Label string `yaml:"label"`
+	URL   string `yaml:"url"`
+}
+
+// Link returns the link carrying the given slug.
+func (p *Pack) Link(slug string) (Link, bool) {
+	for _, link := range p.Links {
+		if link.Slug == slug {
+			return link, true
+		}
+	}
+	return Link{}, false
 }
 
 // Identity is the person's identity section of the content pack: their name,
@@ -80,7 +100,12 @@ func Load() (*Pack, error) {
 		return nil, err
 	}
 
-	return &Pack{Identity: identity, raw: raw}, nil
+	links, err := parseLinks(raw["links"])
+	if err != nil {
+		return nil, err
+	}
+
+	return &Pack{Identity: identity, Links: links, raw: raw}, nil
 }
 
 // parseIdentity parses raw identity.yaml bytes into an Identity. It is
@@ -92,6 +117,19 @@ func parseIdentity(b []byte) (Identity, error) {
 		return Identity{}, fmt.Errorf("parse identity section: %w", err)
 	}
 	return identity, nil
+}
+
+// parseLinks parses raw links.yaml bytes into a slice of Links. Like
+// parseIdentity it is factored out of Load so tests can run against a fixture
+// rather than the fetched pack.
+func parseLinks(b []byte) ([]Link, error) {
+	var doc struct {
+		Links []Link `yaml:"links"`
+	}
+	if err := yaml.Unmarshal(b, &doc); err != nil {
+		return nil, fmt.Errorf("parse links section: %w", err)
+	}
+	return doc.Links, nil
 }
 
 // Raw returns the unparsed YAML bytes for the named section (identity, work,

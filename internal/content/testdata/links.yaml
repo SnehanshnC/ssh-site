@@ -1,0 +1,8 @@
+links:
+  - slug: github
+    label: GitHub
+    url: https://github.com/TestPerson
+
+  - slug: linkedin
+    label: LinkedIn
+    url: https://www.linkedin.com/in/test-person-0a1b2c3d4/

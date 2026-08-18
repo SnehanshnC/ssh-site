@@ -19,6 +19,7 @@ import (
 	"charm.land/wish/v2/bubbletea"
 	"charm.land/wish/v2/logging"
 	recovermw "charm.land/wish/v2/recover"
+	"github.com/charmbracelet/colorprofile"
 
 	"github.com/SnehanshnC/ssh-site/internal/content"
 	"github.com/SnehanshnC/ssh-site/internal/ui"
@@ -45,10 +46,27 @@ func main() {
 	host := envOrDefault("SSH_SITE_HOST", defaultHost)
 	port := envOrDefault("SSH_SITE_PORT", defaultPort)
 
-	teaHandler := func(sess ssh.Session) (tea.Model, []tea.ProgramOption) {
+	// The card's art is a truecolor cell render: every cell paints both a
+	// foreground and a background, which is what makes it proof against the
+	// visitor's own terminal theme. Left to itself Bubble Tea picks the
+	// profile out of the session environment, and OpenSSH forwards TERM but
+	// not COLORTERM, so a truecolor terminal arrives as plain
+	// `xterm-256color` and the portrait gets quantised to 256 colours - the
+	// one path ticket 04 measured and rejected outright, because 256 colours
+	// on a colour master paints the jaw and neck a saturated red. Truecolor or
+	// grayscale, never 256, so the profile is forced here.
+	//
+	// Establishing the visitor's real capability, and rendering the lower
+	// tiers for terminals that do not have this one, is the render-ladder
+	// slice's job. Until then every session gets the tier the card was signed
+	// off in.
+	programHandler := func(sess ssh.Session) *tea.Program {
 		pty, _, _ := sess.Pty()
 		m := ui.New(pack, pty.Window.Width, pty.Window.Height)
-		return m, []tea.ProgramOption{}
+		// Appended after MakeOptions so it is the last writer of the profile.
+		opts := append(bubbletea.MakeOptions(sess),
+			tea.WithColorProfile(colorprofile.TrueColor))
+		return tea.NewProgram(m, opts...)
 	}
 
 	srv, err := wish.NewServer(
@@ -61,7 +79,7 @@ func main() {
 			// (logging) runs first, calling into the recover-guarded chain
 			// (activeterm, then bubbletea) as its "next".
 			recovermw.Middleware(
-				bubbletea.Middleware(teaHandler),
+				bubbletea.MiddlewareWithProgramHandler(programHandler),
 				activeterm.Middleware(), // rejects sessions with no active PTY.
 			),
 			logging.Middleware(),

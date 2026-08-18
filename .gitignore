@@ -11,3 +11,10 @@
 
 # Content pack sections are fetched artifacts; run `make content`.
 internal/content/pack/*.yaml
+
+# Python bytecode from the art pipeline.
+__pycache__/
+
+# Scratch from `make art`. The art it emits into internal/art/assets/ is
+# checked in - that is the point of it being a build-time asset.
+/art/work/

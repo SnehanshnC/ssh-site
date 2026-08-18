@@ -60,3 +60,36 @@ func equalStrings(a, b []string) bool {
 	}
 	return true
 }
+
+// TestParseLinks exercises links parsing against its own testdata fixture, for
+// the same reason TestParseIdentity does: the fetched pack is gitignored and
+// only present after `make content`.
+func TestParseLinks(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("testdata", "links.yaml"))
+	if err != nil {
+		t.Fatalf("read testdata fixture: %v", err)
+	}
+
+	links, err := parseLinks(b)
+	if err != nil {
+		t.Fatalf("parseLinks: %v", err)
+	}
+	if got, want := len(links), 2; got != want {
+		t.Fatalf("parsed %d links, want %d", got, want)
+	}
+
+	pack := &Pack{Links: links}
+	link, ok := pack.Link("linkedin")
+	if !ok {
+		t.Fatal("Link(\"linkedin\") not found")
+	}
+	if got, want := link.URL, "https://www.linkedin.com/in/test-person-0a1b2c3d4/"; got != want {
+		t.Errorf("URL = %q, want %q", got, want)
+	}
+	if got, want := link.Label, "LinkedIn"; got != want {
+		t.Errorf("Label = %q, want %q", got, want)
+	}
+	if _, ok := pack.Link("nope"); ok {
+		t.Error("Link(\"nope\") found something")
+	}
+}
