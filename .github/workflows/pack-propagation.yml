@@ -1,0 +1,98 @@
+name: Pack propagation
+#
+# The last leg of the content pack's auto-latest contract (slice 13): a push
+# to SnehanshnC/content-pack main reaches the live site with no human
+# touching the VM. Polls content-pack's latest commit on a schedule rather
+# than being triggered from a webhook in that repo - content-pack has three
+# consumers and no CI of its own to dispatch from, so the polling lives here,
+# on the one consumer with a VM to redeploy.
+#
+# Every step reuses scripts/deploy.sh - the same script a human runs by hand
+# - over a separate, narrowly-scoped credential (see deploy.sh's own header
+# and deploy/ci-deploy.sudoers). A GitHub-hosted runner's IP is fresh every
+# run, so the box's per-source-IP admin port limits never accumulate against
+# this workflow across runs; there is nothing to allowlist.
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: pack-propagation
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  propagate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Resolve content-pack's latest commit on main
+        id: pack
+        run: |
+          set -eu
+          sha="$(git ls-remote https://github.com/SnehanshnC/content-pack.git main | cut -f1)"
+          [ -n "$sha" ] || { echo "could not resolve content-pack's main" >&2; exit 1; }
+          echo "resolved main to $sha"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Write the ci-deploy credential and box facts
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_BOX_IP: ${{ secrets.DEPLOY_BOX_IP }}
+          DEPLOY_ADMIN_PORT: ${{ secrets.DEPLOY_ADMIN_PORT }}
+          DEPLOY_REMOTE_USER: ${{ secrets.DEPLOY_REMOTE_USER }}
+          DEPLOY_ADDRESS: ${{ secrets.DEPLOY_ADDRESS }}
+        run: |
+          set -eu
+          umask 077
+          mkdir -p "$RUNNER_TEMP/ssh-site-ci"
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$RUNNER_TEMP/ssh-site-ci/key"
+          chmod 600 "$RUNNER_TEMP/ssh-site-ci/key"
+          {
+            printf 'ADMIN_KEY=%s\n' "$RUNNER_TEMP/ssh-site-ci/key"
+            printf 'BOX_IP=%s\n' "$DEPLOY_BOX_IP"
+            printf 'ADMIN_PORT=%s\n' "$DEPLOY_ADMIN_PORT"
+            printf 'REMOTE_USER=%s\n' "$DEPLOY_REMOTE_USER"
+            printf 'ADDRESS=%s\n' "$DEPLOY_ADDRESS"
+          } > "$RUNNER_TEMP/ssh-site-ci/box.env"
+
+      # A cheap, unprivileged read (the marker file install-app.sh writes on
+      # every successful install is world-readable) - this is what keeps most
+      # runs a no-op rather than a rebuild and a service restart.
+      - name: Check the currently-deployed content-pack commit
+        id: deployed
+        run: |
+          set -eu
+          envf="$RUNNER_TEMP/ssh-site-ci/box.env"
+          key="$(grep -E '^ADMIN_KEY=' "$envf" | cut -d= -f2-)"
+          ip="$(grep -E '^BOX_IP=' "$envf" | cut -d= -f2-)"
+          port="$(grep -E '^ADMIN_PORT=' "$envf" | cut -d= -f2-)"
+          user="$(grep -E '^REMOTE_USER=' "$envf" | cut -d= -f2-)"
+          sha="$(ssh -n -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 \
+            -i "$key" -p "$port" "$user@$ip" 'cat /opt/ssh-site/PACK_SHA 2>/dev/null || true')"
+          echo "box currently serves ${sha:-(nothing yet)}"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Go
+        if: steps.pack.outputs.sha != steps.deployed.outputs.sha
+        uses: actions/setup-go@v6
+        with:
+          go-version: stable
+
+      - name: Rebuild and redeploy the app
+        if: steps.pack.outputs.sha != steps.deployed.outputs.sha
+        env:
+          ENV_FILE: ${{ runner.temp }}/ssh-site-ci/box.env
+          DEPLOY_ROLE: ci
+          PACK_REF: ${{ steps.pack.outputs.sha }}
+        run: bash scripts/deploy.sh app
+
+      - name: Up to date
+        if: steps.pack.outputs.sha == steps.deployed.outputs.sha
+        run: echo "content-pack is unchanged (${{ steps.pack.outputs.sha }}) - nothing to redeploy"

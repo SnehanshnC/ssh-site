@@ -1,0 +1,10 @@
+# Written by scripts/deploy.sh (ssh-site slice 13), installed to
+# /etc/sudoers.d/ssh-site-ci-deploy with mode 0440 after `visudo -c -f`
+# validates it. This is the entire trust boundary for the CI deploy
+# credential: ci-deploy holds a key with no password and a plain login shell,
+# so this file - not the shell, not the key - is what stops a leaked
+# GitHub Actions secret from being full admin access. It can run exactly
+# these two invocations of one root:root 0700 script it cannot itself read,
+# with exactly this staging directory, and nothing else as root: no shell,
+# no wildcard, no other command.
+ci-deploy ALL=(root) NOPASSWD: /opt/ssh-site/bin/install-app.sh install /tmp/ssh-site-ci-deploy, /opt/ssh-site/bin/install-app.sh rollback

@@ -5,6 +5,7 @@ import (
 	"go/parser"
 	"go/token"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -483,6 +484,14 @@ func plain(screen string) string { return strings.Join(plainRows(screen), "\n") 
 // Slugs are deliberately never on a caller's list: a slug is what a display
 // mapping is allowed to key to, so one naming a link on this surface is the
 // rule being followed rather than broken.
+// factPattern matches fact at a word boundary, not as a raw substring: a
+// short fact like "SSH" is also a substring of identifiers that have nothing
+// to do with the pack, such as main.go's SSH_SITE_HOST env var name, and a
+// plain strings.Contains would flag those as a false positive.
+func factPattern(fact string) *regexp.Regexp {
+	return regexp.MustCompile(`\b` + regexp.QuoteMeta(fact) + `\b`)
+}
+
 func assertNoFactIsWritten(t *testing.T, facts []string) {
 	t.Helper()
 
@@ -514,7 +523,7 @@ func assertNoFactIsWritten(t *testing.T, facts []string) {
 				return true
 			}
 			for _, fact := range facts {
-				if fact != "" && strings.Contains(lit.Value, fact) {
+				if fact != "" && factPattern(fact).MatchString(lit.Value) {
 					t.Errorf("%s writes down a fact the pack owns: %q", source, fact)
 				}
 			}

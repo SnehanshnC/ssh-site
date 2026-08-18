@@ -18,6 +18,19 @@
 # opens, only then cancel the switch. sshd's own hardening reload gets the
 # same treatment, cheap insurance even though PubkeyAuthentication never
 # changes. See scripts/provision-box.sh for the pattern this borrows.
+#
+# DEPLOY_ROLE=admin (default) is the personal admin key, trusted for anything
+# on the box. DEPLOY_ROLE=ci is what .github/workflows/pack-propagation.yml
+# runs as, over a separate, narrowly-scoped credential (see box.env's
+# CI_DEPLOY_KEY and deploy/ci-deploy.sudoers): it skips every step that needs
+# full root - packages, the app user, the host key, provisioning that very
+# credential - and only ever does what ci-deploy's sudo grant actually
+# allows: install a new binary, or roll back to the last one that worked.
+#
+# PACK_REF picks the content-pack commit to build from (a branch or a commit
+# SHA; a SHA is fetched by exact commit rather than by branch pointer, so
+# what gets built is exactly what got recorded, not whatever main has moved
+# to by the time the fetch runs). Defaults to main.
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -27,6 +40,14 @@ case "$MODE" in
   full|app) ;;
   *) echo "usage: $0 [full|app]" >&2; exit 1 ;;
 esac
+
+ROLE="${DEPLOY_ROLE:-admin}"
+case "$ROLE" in
+  admin|ci) ;;
+  *) echo "usage: DEPLOY_ROLE must be 'admin' or 'ci' (got '$ROLE')" >&2; exit 1 ;;
+esac
+
+PACK_REF="${PACK_REF:-main}"
 
 ENV_FILE="${ENV_FILE:-.scratch/ssh-site/box.env}"
 [ -f "$ENV_FILE" ] || { echo "✗ no $ENV_FILE - run scripts/provision-box.sh first" >&2; exit 1; }
@@ -55,6 +76,18 @@ for v in ADMIN_KEY BOX_IP ADMIN_PORT REMOTE_USER; do
   [ -n "${!v}" ] || die "$ENV_FILE has no $v - re-run scripts/provision-box.sh"
 done
 [ -n "$ADDRESS" ] || ADDRESS="$BOX_IP"
+
+# The local keypair for the CI deploy credential (ROLE=admin only - this is
+# what provisions it on the box; ROLE=ci never reads this, it is handed an
+# ENV_FILE whose ADMIN_KEY/REMOTE_USER already point at ci-deploy's own key).
+CI_DEPLOY_KEY="$(env_val CI_DEPLOY_KEY)"
+[ -n "$CI_DEPLOY_KEY" ] || CI_DEPLOY_KEY="$HOME/.ssh/ssh-site-ci-deploy"
+
+# Where uploads land on the box. ci-deploy's sudoers grant is pinned to this
+# exact path (deploy/ci-deploy.sudoers) - keeping the two roles' staging
+# separate means neither one's uploads can be confused for the other's.
+STAGING_REMOTE_DIR="/tmp/ssh-site-deploy"
+[ "$ROLE" = "ci" ] && STAGING_REMOTE_DIR="/tmp/ssh-site-ci-deploy"
 
 SSH_BASE=(-o PasswordAuthentication=no -o KbdInteractiveAuthentication=no
           -o NumberOfPasswordPrompts=0 -o StrictHostKeyChecking=accept-new
@@ -104,31 +137,65 @@ trap 'rm -rf "$STAGE_DIR"' EXIT
 
 # ── build ────────────────────────────────────────────────────────────────
 log "Fetching the content pack and cross-compiling for linux/amd64"
-sh scripts/fetch-pack.sh
+sh scripts/fetch-pack.sh "$PACK_REF"
+if printf '%s' "$PACK_REF" | grep -Eq '^[0-9a-f]{40}$'; then
+  PACK_SHA="$PACK_REF"
+else
+  PACK_SHA="$(git ls-remote https://github.com/SnehanshnC/content-pack.git "$PACK_REF" | cut -f1)"
+  [ -n "$PACK_SHA" ] || die "could not resolve content-pack ref '$PACK_REF' to a commit"
+fi
+printf '%s' "$PACK_SHA" > "$STAGE_DIR/PACK_SHA"
 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" \
   -o "$BUILD_OUT" ./cmd/ssh-site
-ok "built $BUILD_OUT ($(du -h "$BUILD_OUT" | cut -f1))"
+ok "built $BUILD_OUT ($(du -h "$BUILD_OUT" | cut -f1)) from content-pack $PACK_SHA"
 
-# ── stage templated configs ─────────────────────────────────────────────
-# The admin port and login user are private facts (box.env, gitignored), so
-# the checked-in templates carry placeholders rather than the real values.
-log "Templating deploy configs with this box's own facts"
-sed "s/@ADMIN_PORT@/$ADMIN_PORT/g" deploy/nftables.conf > "$STAGE_DIR/nftables.conf"
-sed "s/@ADMIN_PORT@/$ADMIN_PORT/g" deploy/fail2ban-jail.conf > "$STAGE_DIR/fail2ban-jail.conf"
-sed "s/@ADMIN_USER@/$REMOTE_USER/g" deploy/sshd-hardening.conf > "$STAGE_DIR/sshd-hardening.conf"
-cp deploy/ssh-site.service "$STAGE_DIR/ssh-site.service"
-ok "staged configs in $STAGE_DIR"
+UPLOAD_FILES=("$BUILD_OUT" "$STAGE_DIR/PACK_SHA")
+
+if [ "$ROLE" = "admin" ]; then
+  # ── stage templated configs ───────────────────────────────────────────
+  # The admin port and login user are private facts (box.env, gitignored), so
+  # the checked-in templates carry placeholders rather than the real values.
+  log "Templating deploy configs with this box's own facts"
+  sed "s/@ADMIN_PORT@/$ADMIN_PORT/g" deploy/nftables.conf > "$STAGE_DIR/nftables.conf"
+  sed "s/@ADMIN_PORT@/$ADMIN_PORT/g" deploy/fail2ban-jail.conf > "$STAGE_DIR/fail2ban-jail.conf"
+  sed "s/@ADMIN_USER@/$REMOTE_USER/g" deploy/sshd-hardening.conf > "$STAGE_DIR/sshd-hardening.conf"
+  cp deploy/ssh-site.service "$STAGE_DIR/ssh-site.service"
+  cp deploy/install-app.sh "$STAGE_DIR/install-app.sh"
+  cp deploy/ci-deploy.sudoers "$STAGE_DIR/ci-deploy.sudoers"
+  ok "staged configs in $STAGE_DIR"
+
+  # ── the CI deploy credential ──────────────────────────────────────────
+  # Generated once, locally, and reused on every admin-run redeploy after
+  # that - never regenerated, the same way the host key never is. Its public
+  # half is not a secret; the private half never leaves this machine except
+  # as a GitHub Actions secret (see .github/workflows/pack-propagation.yml
+  # and the "gh secret set" step this script's operator runs once by hand).
+  log "Preparing the CI deploy credential"
+  if [ ! -f "$CI_DEPLOY_KEY" ]; then
+    mkdir -p "$(dirname "$CI_DEPLOY_KEY")"
+    ssh-keygen -t ed25519 -a 100 -C "ssh-site ci-deploy" -f "$CI_DEPLOY_KEY" -N "" -q
+    ok "generated a new CI deploy key at $CI_DEPLOY_KEY"
+  else
+    ok "reusing the CI deploy key at $CI_DEPLOY_KEY"
+  fi
+  cp "$CI_DEPLOY_KEY.pub" "$STAGE_DIR/ci-deploy.pub"
+
+  UPLOAD_FILES+=("$STAGE_DIR/nftables.conf" "$STAGE_DIR/fail2ban-jail.conf"
+                 "$STAGE_DIR/sshd-hardening.conf" "$STAGE_DIR/ssh-site.service"
+                 "$STAGE_DIR/install-app.sh" "$STAGE_DIR/ci-deploy.sudoers"
+                 "$STAGE_DIR/ci-deploy.pub")
+fi
 
 # ── upload ───────────────────────────────────────────────────────────────
-log "Uploading the binary and configs"
-box 'mkdir -p /tmp/ssh-site-deploy'
+log "Uploading to $STAGING_REMOTE_DIR on the box"
+box "mkdir -p $STAGING_REMOTE_DIR"
 scp -o PasswordAuthentication=no -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 \
   -i "$ADMIN_KEY" -P "$ADMIN_PORT" \
-  "$BUILD_OUT" "$STAGE_DIR/nftables.conf" "$STAGE_DIR/fail2ban-jail.conf" \
-  "$STAGE_DIR/sshd-hardening.conf" "$STAGE_DIR/ssh-site.service" \
-  "$REMOTE_USER@$BOX_IP:/tmp/ssh-site-deploy/" >/dev/null
-ok "uploaded to /tmp/ssh-site-deploy on the box"
+  "${UPLOAD_FILES[@]}" \
+  "$REMOTE_USER@$BOX_IP:$STAGING_REMOTE_DIR/" >/dev/null
+ok "uploaded to $STAGING_REMOTE_DIR on the box"
 
+if [ "$ROLE" = "admin" ]; then
 # ── prerequisite packages ───────────────────────────────────────────────
 log "Installing prerequisite packages (idempotent)"
 remote <<'EOS'
@@ -138,8 +205,9 @@ apt-get update -qq
 apt-get install -y -qq nftables fail2ban unattended-upgrades >/dev/null
 echo "packages present: nftables, fail2ban, unattended-upgrades"
 EOS
+fi
 
-if [ "$MODE" = "full" ]; then
+if [ "$MODE" = "full" ] && [ "$ROLE" = "admin" ]; then
   # ── sshd hardening, with its own dead man's switch ────────────────────
   # PubkeyAuthentication never changes and the admin key already works
   # without a password, so this is lower risk than the port move it borrows
@@ -183,6 +251,7 @@ echo "sshd rollback cancelled"
 EOS
 fi
 
+if [ "$ROLE" = "admin" ]; then
 # ── dedicated app user ──────────────────────────────────────────────────
 log "Creating the dedicated app user (idempotent)"
 remote <<'EOS'
@@ -251,29 +320,65 @@ shred -u /tmp/ssh-site-deploy/host_ed25519 /tmp/ssh-site-deploy/host_ed25519.pub
 EOS
 ok "host key backed up off-box to $BACKUP_DIR"
 
-# ── install the binary and the systemd unit ─────────────────────────────
-log "Installing the binary and the systemd unit"
+# ── the CI deploy credential, narrowly scoped (slice 13) ────────────────
+# ci-deploy gets a real login shell (sshd needs one to run any command at
+# all, even non-interactively - /usr/sbin/nologin refuses every command, not
+# just an interactive one) but no password and no admin sudo. The only door
+# this account has to root is deploy/ci-deploy.sudoers, and install-app.sh
+# itself is root:root 0700 so ci-deploy can never read or edit the one thing
+# it's allowed to sudo into.
+log "Provisioning the ci-deploy user and its narrow sudo grant"
 remote <<'EOS'
 set -eu
-install -o root -g root -m 0755 -d /opt/ssh-site
-install -o root -g root -m 0755 /tmp/ssh-site-deploy/ssh-site-linux-amd64 /opt/ssh-site/ssh-site
-install -o root -g root -m 0644 /tmp/ssh-site-deploy/ssh-site.service /etc/systemd/system/ssh-site.service
-systemctl daemon-reload
-systemctl enable ssh-site.service
-systemctl restart ssh-site.service
-sleep 1
-if ! systemctl is-active --quiet ssh-site.service; then
-    systemctl status ssh-site.service --no-pager || true
-    journalctl -u ssh-site.service --no-pager -n 40 || true
+staged=/tmp/ssh-site-deploy
+if ! id ci-deploy >/dev/null 2>&1; then
+    useradd --system --no-create-home --home-dir /home/ci-deploy --shell /bin/bash ci-deploy
+    echo "created the ci-deploy system user"
+else
+    echo "ci-deploy user already exists"
+fi
+install -o ci-deploy -g ci-deploy -m 0755 -d /home/ci-deploy
+install -o ci-deploy -g ci-deploy -m 0700 -d /home/ci-deploy/.ssh
+install -o ci-deploy -g ci-deploy -m 0600 "$staged/ci-deploy.pub" /home/ci-deploy/.ssh/authorized_keys
+
+install -o root -g root -m 0700 -d /opt/ssh-site/bin
+install -o root -g root -m 0700 "$staged/install-app.sh" /opt/ssh-site/bin/install-app.sh
+
+live_sudoers=/etc/sudoers.d/ssh-site-ci-deploy
+if visudo -c -f "$staged/ci-deploy.sudoers"; then
+    install -o root -g root -m 0440 "$staged/ci-deploy.sudoers" "$live_sudoers"
+    echo "ci-deploy sudoers rule installed"
+else
+    echo "staged sudoers file failed validation - leaving any existing rule in place" >&2
     exit 1
 fi
-echo "ssh-site.service is active"
-ss -ltnp "sport = :22" || true
+echo "ci-deploy provisioned"
 EOS
-app_reachable 12 || die "port 22 did not answer after the app was installed"
-ok "the app server answers on port 22"
+ok "ci-deploy is provisioned with a sudo grant scoped to install-app.sh"
+fi
 
-if [ "$MODE" = "full" ]; then
+# ── install the binary, with a health-checked automatic rollback ───────
+# install-app.sh does the actual file placement and restart, as root, via
+# sudo - the same entrypoint the admin key and the narrowly-scoped ci-deploy
+# key both go through. What differs by role is only which credential is
+# calling it and what it is allowed to call. app_reachable is the same check
+# a visitor's own client makes: a real, anonymous, no-PTY connection to port
+# 22. A failure there - whether install-app.sh itself failed, or the new
+# binary came up broken - rolls back to the last one that passed it.
+log "Installing the new binary via install-app.sh"
+if box sudo /opt/ssh-site/bin/install-app.sh install "$STAGING_REMOTE_DIR" && app_reachable 12; then
+  ok "the app server answers on port 22"
+else
+  warn "the new binary failed its health check; rolling back to the last-known-good binary"
+  box sudo /opt/ssh-site/bin/install-app.sh rollback || true
+  if app_reachable 12; then
+    die "deploy failed its health check and was rolled back to the previous binary - investigate before pushing again"
+  else
+    die "deploy failed its health check and the rollback did not come up either - the box needs a human"
+  fi
+fi
+
+if [ "$MODE" = "full" ] && [ "$ROLE" = "admin" ]; then
   # ── nftables, with its own dead man's switch ──────────────────────────
   # The riskiest step, saved for last so its "prove" step is the real thing:
   # both the admin port and the now-deployed app on 22, through the new
@@ -369,22 +474,29 @@ systemctl is-enabled apt-daily.timer apt-daily-upgrade.timer 2>&1 || true
 EOS
 fi
 
-# ── record ───────────────────────────────────────────────────────────────
-RECORD=".scratch/ssh-site/deploy.md"
-{
-  echo "# Deploy record"
-  echo
-  echo "Written by scripts/deploy.sh ($MODE) on $(date -u '+%Y-%m-%d %H:%M UTC' 2>/dev/null || true)."
-  echo "Private, like the rest of .scratch/."
-  echo
-  echo "| Fact | Value |"
-  echo "| --- | --- |"
-  echo "| Address | ssh $ADDRESS |"
-  echo "| App server | port 22, user ssh-site, /opt/ssh-site/ssh-site |"
-  echo "| Host key | /var/lib/ssh-site/host_ed25519, backed up to /var/backups/ssh-site and $BACKUP_DIR |"
-  echo "| Host key fingerprint | $HOSTKEY_FINGERPRINT |"
-} > "$RECORD"
-ok "wrote $RECORD"
+if [ "$ROLE" = "admin" ]; then
+  # ── record ─────────────────────────────────────────────────────────────
+  RECORD=".scratch/ssh-site/deploy.md"
+  {
+    echo "# Deploy record"
+    echo
+    echo "Written by scripts/deploy.sh ($MODE) on $(date -u '+%Y-%m-%d %H:%M UTC' 2>/dev/null || true)."
+    echo "Private, like the rest of .scratch/."
+    echo
+    echo "| Fact | Value |"
+    echo "| --- | --- |"
+    echo "| Address | ssh $ADDRESS |"
+    echo "| App server | port 22, user ssh-site, /opt/ssh-site/ssh-site |"
+    echo "| Host key | /var/lib/ssh-site/host_ed25519, backed up to /var/backups/ssh-site and $BACKUP_DIR |"
+    echo "| Host key fingerprint | $HOSTKEY_FINGERPRINT |"
+    echo "| Content pack | $PACK_SHA |"
+    echo "| CI deploy key | $CI_DEPLOY_KEY (public half authorized for ci-deploy on the box) |"
+  } > "$RECORD"
+  ok "wrote $RECORD"
+fi
 
-log "Done ($MODE)"
-printf '  %s\n' "$HOSTKEY_FINGERPRINT"
+log "Done ($MODE, role=$ROLE)"
+printf '  content-pack %s\n' "$PACK_SHA"
+if [ "$ROLE" = "admin" ]; then
+  printf '  %s\n' "$HOSTKEY_FINGERPRINT"
+fi

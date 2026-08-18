@@ -4,13 +4,19 @@
 # live in that repo, never hardcoded here, so this script is the only place
 # that pulls them in - run via `make content`.
 #
+# Takes an optional ref (branch or commit SHA) as $1, defaulting to main.
+# scripts/deploy.sh passes a pinned commit SHA so what it builds is exactly
+# what it recorded, rather than whatever main has moved to by the time this
+# runs.
+#
 # Each file is downloaded to a temp file first and only moved into place once
 # the download succeeds, so a failed run never leaves a partial file behind.
 # The script exits non-zero if any file fails to download.
 
 set -eu
 
-base_url="https://raw.githubusercontent.com/SnehanshnC/content-pack/main"
+ref="${1:-main}"
+base_url="https://raw.githubusercontent.com/SnehanshnC/content-pack/$ref"
 dest_dir="internal/content/pack"
 files="identity.yaml work.yaml projects.yaml links.yaml hobbies.yaml"
 

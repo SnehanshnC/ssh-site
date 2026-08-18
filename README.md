@@ -109,6 +109,34 @@ What either script built - the IP, the admin port, where the key and the
 DuckDNS token live - is recorded outside this repo. None of that is ever
 committed here.
 
+## Staying current with the content pack
+
+[.github/workflows/pack-propagation.yml](.github/workflows/pack-propagation.yml)
+polls [content-pack](https://github.com/SnehanshnC/content-pack)'s `main`
+every 15 minutes. When it has moved, the workflow cross-compiles against the
+new commit and runs `bash scripts/deploy.sh app` against the box - the same
+call a human makes, over a separate credential scoped to exactly that: a
+`ci-deploy` user whose only door to root is
+[deploy/ci-deploy.sudoers](deploy/ci-deploy.sudoers), a sudo grant pinned to
+one invocation of [deploy/install-app.sh](deploy/install-app.sh) and nothing
+else. A leaked repo secret gets a new binary onto the box; it does not get a
+shell, the admin key, or any of the box's other accounts.
+
+`install-app.sh` snapshots whatever is live before replacing it. If the new
+binary fails its restart or fails the same reachability check a visitor's own
+client makes, `scripts/deploy.sh` rolls back to the snapshot automatically -
+a bad pack push or a broken build never takes the site down. The box tracks
+what it is currently running at `/opt/ssh-site/PACK_SHA`, world-readable, so
+each poll can tell in one cheap SSH read whether there is anything to do.
+
+Reproducing this on a rebuilt box needs nothing beyond what's already here:
+`scripts/provision-box.sh` builds the VM, then any `bash scripts/deploy.sh
+app` run with the personal admin key re-provisions `ci-deploy`,
+`install-app.sh` and the sudoers rule from what's checked into this repo. The
+GitHub side - `DEPLOY_SSH_KEY`, `DEPLOY_BOX_IP`, `DEPLOY_ADMIN_PORT`,
+`DEPLOY_REMOTE_USER`, `DEPLOY_ADDRESS` - is five `gh secret set` calls away
+from whatever `scripts/deploy.sh` just generated and box.env already has.
+
 ## Planning
 
 Planning happens on a local wayfinder tracker kept out of this repo.
