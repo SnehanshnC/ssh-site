@@ -1,0 +1,71 @@
+projects:
+  - slug: test-thing
+    name: Test Thing
+    summary: A thing built to be tested.
+    highlights:
+      - Did the first testable thing.
+      - Did a second one.
+    stack:
+      - Go
+      - YAML
+    teammates:
+      - Test Teammate
+    built_at: TestHacks
+    date: "2025-01"
+    links:
+      code:
+        - label: first repo
+          url: https://example.com/test-thing/one
+        - url: https://example.com/test-thing/two
+      write_up:
+        label: Write-up
+        url: https://example.com/test-thing/writeup
+    notes:
+      - Noted for the record.
+
+  - slug: bare-thing
+    name: Bare Thing
+    summary: A thing with nothing else said about it.
+
+awards:
+  - slug: test-thing-first
+    project: test-thing
+    event: TestHacks
+    year: 2025
+    placement: 1st Place Overall
+    track: Test Track
+    participants: 40+ teams
+    prize: $100
+    extras:
+      - Best Use of Testing
+    notes:
+      - The first one.
+
+  - slug: test-thing-selected
+    project: test-thing
+    event: Test Selection Round
+    selection: Test Select, 4 of 400
+
+  - slug: bare-thing-second
+    project: bare-thing
+    event: TestHacks 2024
+    year: 2024
+    placement: "2nd"
+
+  - slug: orphan-award
+    project: no-such-thing
+    event: Test Orphan Cup
+
+  - slug: unattached-award
+    event: Test Unattached Cup
+
+programs:
+  - slug: test-program
+    name: Test Program
+    detail: Invited to test.
+    date: "2025-02"
+
+  - slug: other-test-program
+    name: Other Test Program
+    detail: Tested elsewhere.
+    year: 2024

@@ -1,10 +1,6 @@
 package ui
 
 import (
-	"go/ast"
-	"go/parser"
-	"go/token"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -178,47 +174,7 @@ func TestNoWorkFactIsWrittenInThisRepo(t *testing.T) {
 			facts = append(facts, link.Label, link.URL)
 		}
 	}
-
-	// Slugs are deliberately not on that list: a slug is what a display mapping
-	// is allowed to key to, so one naming a link on this surface is the rule
-	// being followed rather than broken.
-	var sources []string
-	for _, pattern := range []string{
-		filepath.Join("..", "*", "*.go"), // every internal package
-		filepath.Join("..", "..", "cmd", "*", "*.go"),
-	} {
-		matched, err := filepath.Glob(pattern)
-		if err != nil {
-			t.Fatalf("list %s: %v", pattern, err)
-		}
-		sources = append(sources, matched...)
-	}
-	scanned := 0
-	for _, source := range sources {
-		if strings.HasSuffix(source, "_test.go") {
-			continue
-		}
-		file, err := parser.ParseFile(token.NewFileSet(), source, nil, 0)
-		if err != nil {
-			t.Fatalf("parse %s: %v", source, err)
-		}
-		scanned++
-		ast.Inspect(file, func(n ast.Node) bool {
-			lit, ok := n.(*ast.BasicLit)
-			if !ok || lit.Kind != token.STRING {
-				return true
-			}
-			for _, fact := range facts {
-				if fact != "" && strings.Contains(lit.Value, fact) {
-					t.Errorf("%s writes down a fact the pack owns: %q", source, fact)
-				}
-			}
-			return true
-		})
-	}
-	if scanned == 0 {
-		t.Fatal("scanned no sources, so the check proves nothing")
-	}
+	assertNoFactIsWritten(t, facts)
 }
 
 // plainRow strips the colour off one composed row.

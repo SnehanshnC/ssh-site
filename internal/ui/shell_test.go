@@ -1,6 +1,10 @@
 package ui
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -464,6 +468,59 @@ func live(card string) string {
 }
 
 func plain(screen string) string { return strings.Join(plainRows(screen), "\n") }
+
+// assertNoFactIsWritten fails for every source in this repo that writes down
+// one of the facts it is handed. It is the check each section slice makes about
+// its own part of the pack, written once here because the rule is the surface's
+// rather than any one section's: the pack is the source of every fact shown, so
+// a fact in a string literal is a fact that stops following the pack the moment
+// the pack changes.
+//
+// Slugs are deliberately never on a caller's list: a slug is what a display
+// mapping is allowed to key to, so one naming a link on this surface is the
+// rule being followed rather than broken.
+func assertNoFactIsWritten(t *testing.T, facts []string) {
+	t.Helper()
+
+	var sources []string
+	for _, pattern := range []string{
+		filepath.Join("..", "*", "*.go"), // every internal package
+		filepath.Join("..", "..", "cmd", "*", "*.go"),
+	} {
+		matched, err := filepath.Glob(pattern)
+		if err != nil {
+			t.Fatalf("list %s: %v", pattern, err)
+		}
+		sources = append(sources, matched...)
+	}
+
+	scanned := 0
+	for _, source := range sources {
+		if strings.HasSuffix(source, "_test.go") {
+			continue
+		}
+		file, err := parser.ParseFile(token.NewFileSet(), source, nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", source, err)
+		}
+		scanned++
+		ast.Inspect(file, func(n ast.Node) bool {
+			lit, ok := n.(*ast.BasicLit)
+			if !ok || lit.Kind != token.STRING {
+				return true
+			}
+			for _, fact := range facts {
+				if fact != "" && strings.Contains(lit.Value, fact) {
+					t.Errorf("%s writes down a fact the pack owns: %q", source, fact)
+				}
+			}
+			return true
+		})
+	}
+	if scanned == 0 {
+		t.Fatal("scanned no sources, so the check proves nothing")
+	}
+}
 
 // fakePage answers every key with one action, so each branch of the protocol
 // can be exercised without a section page that means something.

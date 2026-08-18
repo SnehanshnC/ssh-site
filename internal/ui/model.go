@@ -46,6 +46,7 @@ var sectionKeys = []string{"w", "p", "a", "l", "h"}
 // to the stub, and when the last entry lands section.go goes away.
 var typedSections = map[string]func(*content.Pack) Page{
 	"w": openWork,
+	"p": openProjects,
 }
 
 var jumpKeys = func() map[string]bool {

@@ -26,6 +26,14 @@ type Pack struct {
 	Links    []Link
 	Work     []Job
 
+	// The three lists of the projects section, kept flat here rather than
+	// nested in a Projects value so that a consumer reads pack.Awards the same
+	// way it reads pack.Work. Programs is parsed and rendered nowhere - see
+	// projects.go for why it is typed at all.
+	Projects []Project
+	Awards   []Award
+	Programs []Program
+
 	raw map[string][]byte
 }
 
@@ -148,7 +156,20 @@ func Load() (*Pack, error) {
 		return nil, err
 	}
 
-	return &Pack{Identity: identity, Links: links, Work: work, raw: raw}, nil
+	projects, err := parseProjects(raw["projects"])
+	if err != nil {
+		return nil, err
+	}
+
+	return &Pack{
+		Identity: identity,
+		Links:    links,
+		Work:     work,
+		Projects: projects.Projects,
+		Awards:   projects.Awards,
+		Programs: projects.Programs,
+		raw:      raw,
+	}, nil
 }
 
 // parseIdentity parses raw identity.yaml bytes into an Identity. It is

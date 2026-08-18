@@ -10,18 +10,19 @@ import (
 
 // The stub section page.
 //
-// The navigation shell built the stack, not the sections: the real projects,
-// awards, links and hobbies pages are four slices of their own, each of which
-// types its own part of the content pack and designs its own screen. What is
-// here is the page shape those four replace - a list that drills into a detail
-// - reading the pack generically so that it shows real facts rather than
-// invented ones while it stands in for them.
+// The navigation shell built the stack, not the sections: the real awards,
+// links and hobbies pages are three slices of their own, each of which types
+// its own part of the content pack and designs its own screen. What is here is
+// the page shape those three replace - a list that drills into a detail -
+// reading the pack generically so that it shows real facts rather than invented
+// ones while it stands in for them.
 //
-// Work has already gone: openSection routes `w` to the typed pages in work.go
-// and this file lost its entry for it, which is the trade each section slice
-// makes. When the last of the four lands, this file goes with it - the generic
-// pack reading above all, which exists only because a section that no slice has
-// typed yet has no shape to read it into.
+// Work and projects have already gone: openSection routes `w` and `p` to the
+// typed pages in work.go and projects.go and this file lost its rows for them,
+// which is the trade each section slice makes. When the last of the three
+// lands, this file goes with it - the generic pack reading above all, which
+// exists only because a section that no slice has typed yet has no shape to
+// read it into.
 
 // section is one destination the card's nav row and the letter jumps open.
 type section struct {
@@ -34,7 +35,6 @@ type section struct {
 }
 
 var stubSections = []section{
-	{"p", "projects", "projects", "projects", "project", "projects"},
 	{"a", "awards", "projects", "awards", "award", "awards"},
 	{"l", "links", "links", "links", "link", "links"},
 	{"h", "hobbies", "hobbies", "hobbies", "hobby", "hobbies"},
