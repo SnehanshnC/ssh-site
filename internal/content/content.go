@@ -18,9 +18,8 @@ var packFS embed.FS
 // keyed by their name without the .yaml extension.
 var sections = []string{"identity", "work", "projects", "links", "hobbies"}
 
-// Pack is the parsed content pack consumed by the TUI. A section is typed by
-// the build slice that builds its page; the sections whose slices have not
-// landed yet are kept as raw YAML bytes until they do.
+// Pack is the parsed content pack consumed by the TUI. Every section is typed
+// by the build slice that builds its page.
 type Pack struct {
 	Identity Identity
 	Links    []Link
@@ -33,6 +32,13 @@ type Pack struct {
 	Projects []Project
 	Awards   []Award
 	Programs []Program
+
+	// The two lists of the hobbies section. Shows fold into the hobbies page as
+	// their own subsection rather than a section of their own - see
+	// internal/ui/hobbies.go - so they are typed here beside the hobbies they
+	// sit next to on that page, not as a section in their own right.
+	Shows   []Show
+	Hobbies []Hobby
 
 	raw map[string][]byte
 }
@@ -93,6 +99,28 @@ func (l *NamedLinks) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
+// Show is one entry of the pack's hobbies section: something watched, folded
+// into the hobbies page as its own subsection rather than a section of its own.
+type Show struct {
+	Slug     string `yaml:"slug"`
+	Title    string `yaml:"title"`
+	Category string `yaml:"category"`
+	Blurb    string `yaml:"blurb"`
+}
+
+// Hobby is one entry of the pack's hobbies section proper: what is done off
+// the clock.
+//
+// RelatedProject names a projects-section slug the way Job's Project field
+// does, for the pack to draw a line this build does not follow - see work.go
+// for the same relation, left unfollowed for the same reason: the spec routes
+// project detail from the projects and awards sections only.
+type Hobby struct {
+	Slug           string `yaml:"slug"`
+	Detail         string `yaml:"detail"`
+	RelatedProject string `yaml:"related_project"`
+}
+
 // Identity is the person's identity section of the content pack: their name,
 // role, education, and the tagline pool surfaces choose from.
 type Identity struct {
@@ -125,8 +153,8 @@ type Skills struct {
 	Tools      []string `yaml:"tools"`
 }
 
-// Load reads the embedded content pack, parses identity.yaml into typed
-// structs, and keeps the remaining sections available as raw bytes via Raw.
+// Load reads the embedded content pack and parses every section into typed
+// structs, keeping the raw bytes behind them available too, via Raw.
 //
 // Load will fail to even compile into a binary until scripts/fetch-pack.sh
 // (via `make content`) has populated internal/content/pack - that's
@@ -161,6 +189,11 @@ func Load() (*Pack, error) {
 		return nil, err
 	}
 
+	shows, hobbies, err := parseHobbies(raw["hobbies"])
+	if err != nil {
+		return nil, err
+	}
+
 	return &Pack{
 		Identity: identity,
 		Links:    links,
@@ -168,6 +201,8 @@ func Load() (*Pack, error) {
 		Projects: projects.Projects,
 		Awards:   projects.Awards,
 		Programs: projects.Programs,
+		Shows:    shows,
+		Hobbies:  hobbies,
 		raw:      raw,
 	}, nil
 }
@@ -196,9 +231,22 @@ func parseLinks(b []byte) ([]Link, error) {
 	return doc.Links, nil
 }
 
-// Raw returns the unparsed YAML bytes for the named section (identity, work,
-// projects, links, or hobbies), for the sections whose own slice has not typed
-// them yet. It returns nil for an unknown section.
+// parseHobbies parses raw hobbies.yaml bytes into its two lists. Like
+// parseIdentity and parseLinks it is factored out of Load so tests can run
+// against a fixture rather than the fetched pack.
+func parseHobbies(b []byte) (shows []Show, hobbies []Hobby, err error) {
+	var doc struct {
+		Shows   []Show  `yaml:"shows"`
+		Hobbies []Hobby `yaml:"hobbies"`
+	}
+	if err := yaml.Unmarshal(b, &doc); err != nil {
+		return nil, nil, fmt.Errorf("parse hobbies section: %w", err)
+	}
+	return doc.Shows, doc.Hobbies, nil
+}
+
+// Raw returns the unparsed YAML bytes for the named section. It returns nil
+// for an unknown section.
 func (p *Pack) Raw(section string) []byte {
 	return p.raw[section]
 }

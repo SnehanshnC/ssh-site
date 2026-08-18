@@ -1,0 +1,17 @@
+shows:
+  - slug: test-show-one
+    title: Test Show One
+    category: test-category
+    blurb: A show worth testing.
+
+  - slug: test-show-two
+    title: Test Show Two
+    category: another-category
+
+hobbies:
+  - slug: testing
+    detail: Spends weekends writing tests.
+
+  - slug: test-related
+    detail: Has a hobby that points back at a project.
+    related_project: test-thing

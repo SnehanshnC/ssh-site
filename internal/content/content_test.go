@@ -141,6 +141,55 @@ func TestParseWork(t *testing.T) {
 	}
 }
 
+// TestParseHobbies exercises hobbies parsing against its own testdata fixture,
+// for the same reason the two above do: the fetched pack is gitignored and
+// only present after `make content`.
+//
+// The section's one file carries two lists, so what is checked is that both
+// come out of one parse - shows with and without a blurb, and a hobby with and
+// without the project slug it points back at.
+func TestParseHobbies(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("testdata", "hobbies.yaml"))
+	if err != nil {
+		t.Fatalf("read testdata fixture: %v", err)
+	}
+
+	shows, hobbies, err := parseHobbies(b)
+	if err != nil {
+		t.Fatalf("parseHobbies: %v", err)
+	}
+	if got, want := len(shows), 2; got != want {
+		t.Fatalf("parsed %d shows, want %d", got, want)
+	}
+	if got, want := len(hobbies), 2; got != want {
+		t.Fatalf("parsed %d hobbies, want %d", got, want)
+	}
+
+	if got, want := shows[0].Title, "Test Show One"; got != want {
+		t.Errorf("shows[0].Title = %q, want %q", got, want)
+	}
+	if got, want := shows[0].Category, "test-category"; got != want {
+		t.Errorf("shows[0].Category = %q, want %q", got, want)
+	}
+	if got, want := shows[0].Blurb, "A show worth testing."; got != want {
+		t.Errorf("shows[0].Blurb = %q, want %q", got, want)
+	}
+	if shows[1].Blurb != "" {
+		t.Errorf("shows[1].Blurb = %q for a show with none, want it empty", shows[1].Blurb)
+	}
+
+	if got, want := hobbies[0].Detail, "Spends weekends writing tests."; got != want {
+		t.Errorf("hobbies[0].Detail = %q, want %q", got, want)
+	}
+	if hobbies[0].RelatedProject != "" {
+		t.Errorf("hobbies[0].RelatedProject = %q for a hobby with none, want it empty",
+			hobbies[0].RelatedProject)
+	}
+	if got, want := hobbies[1].RelatedProject, "test-thing"; got != want {
+		t.Errorf("hobbies[1].RelatedProject = %q, want %q", got, want)
+	}
+}
+
 // TestNamedLinksReadBothShapes is the finding a prototype round cost: a name in
 // an entry's links block holds either one link or a list of them. Both are read
 // into the same flat, ordered list, keyed by the name, and a link with no label

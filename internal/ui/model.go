@@ -39,16 +39,15 @@ type Model struct {
 var sectionKeys = []string{"w", "p", "a", "l", "h"}
 
 // typedSections maps a letter to the page its own build slice wrote for it.
-//
-// A section is typed by one slice: that slice adds its opener here and deletes
-// the section's row from the stub table in section.go, so there is one way in
-// to a section rather than two. Everything not named here still falls through
-// to the stub, and when the last entry lands section.go goes away.
+// Hobbies was the last section left generic, so every letter jump now has a
+// page of its own here - section.go's stand-in, which read the pack
+// generically for whichever section had not been typed yet, is gone with it.
 var typedSections = map[string]func(*content.Pack) Page{
 	"w": openWork,
 	"p": openProjects,
 	"a": openAwards,
 	"l": openLinks,
+	"h": openHobbies,
 }
 
 var jumpKeys = func() map[string]bool {
@@ -65,7 +64,7 @@ func openSection(pack *content.Pack, key string) Page {
 	if open, ok := typedSections[key]; ok {
 		return open(pack)
 	}
-	return openStub(pack, key)
+	return nil
 }
 
 // New builds a Model from the loaded content pack and the session's initial
