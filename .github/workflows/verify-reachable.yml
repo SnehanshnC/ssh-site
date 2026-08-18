@@ -1,0 +1,33 @@
+name: Verify reachable from a second IP
+
+# One-off manual check for slice 12's flood-test acceptance criterion: a
+# GitHub-hosted runner is a genuinely different source IP from whatever
+# machine is running the flood loop, which a single dev machine can't be for
+# itself. Never runs on push/PR - dispatch only, and nothing here is part of
+# the app's own CI. Removed again once the verification is recorded.
+on:
+  workflow_dispatch:
+    inputs:
+      host:
+        description: "Address or IP to check"
+        required: true
+      port:
+        description: "Port to check"
+        required: false
+        default: "22"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Record this runner's own outbound IP
+        run: curl -s https://api.ipify.org && echo
+
+      - name: Anonymous non-PTY SSH session against the app port
+        run: |
+          set -e
+          date -u
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+              -o BatchMode=yes -o ConnectTimeout=10 \
+              -p "${{ inputs.port }}" "${{ inputs.host }}" true
+          echo "REACHED ${{ inputs.host }}:${{ inputs.port }}"
