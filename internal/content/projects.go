@@ -17,7 +17,8 @@ import (
 // under the project it was won for, which is what lets the awards section read
 // it in the order the pack wrote it while a project page reads only its own.
 // AwardsFor is that second reading, and it lives here so both directions agree
-// on what "this project's awards" means.
+// on what "this project's awards" means. Project is the same relation followed
+// the other way, for the award that drills into what it was won for.
 
 // Project is one entry of the projects list: what was built, what it does, and
 // the facts that back it up.
@@ -82,6 +83,26 @@ type Projects struct {
 	Projects []Project `yaml:"projects"`
 	Awards   []Award   `yaml:"awards"`
 	Programs []Program `yaml:"programs"`
+}
+
+// Project returns the project carrying a slug, and says whether the pack
+// carries one at all.
+//
+// It is the relation AwardsFor reads, followed forward: an award names the
+// project it was won for, and the awards section drills into that project's own
+// page. A slug no project carries resolves to nothing rather than to an empty
+// project, so a reference the pack has yet to fix is something a surface can
+// see and step around instead of a page with nothing on it.
+func (p *Pack) Project(slug string) (Project, bool) {
+	if slug == "" {
+		return Project{}, false
+	}
+	for _, project := range p.Projects {
+		if project.Slug == slug {
+			return project, true
+		}
+	}
+	return Project{}, false
 }
 
 // AwardsFor returns the awards won for the project carrying a slug, in the

@@ -38,7 +38,7 @@ func (p projectsList) Chrome() Chrome {
 
 func (p projectsList) Key(key string, cursor int) (Action, Page) {
 	if key == "enter" && cursor >= 0 && cursor < len(p.pack.Projects) {
-		return Push, projectPage(p.pack, p.pack.Projects[cursor])
+		return Push, projectPage(p.pack, p.pack.Projects[cursor], "projects")
 	}
 	return Ignored, nil
 }
@@ -65,14 +65,22 @@ func (p projectsList) Blocks(width, cursor int) [][]string {
 //
 // It is the constructor rather than a struct literal because a project page is
 // reached from two directions - down from this section's list, and across from
-// an award that names the project it was won for.
-func projectPage(pack *content.Pack, project content.Project) Page {
-	return projectDetail{project: project, awards: pack.AwardsFor(project.Slug)}
+// an award that names the project it was won for - and the root of the
+// breadcrumb is what those two differ by. A page opened from the awards section
+// says awards, because the breadcrumb is the way the visitor came in and not a
+// second name for the page they are on.
+func projectPage(pack *content.Pack, project content.Project, root string) Page {
+	return projectDetail{
+		root:    root,
+		project: project,
+		awards:  pack.AwardsFor(project.Slug),
+	}
 }
 
 // projectDetail is one project: what it does, what it is made of, what it won,
 // and where to go and look at it.
 type projectDetail struct {
+	root    string // the section it was opened from, and so its first crumb
 	project content.Project
 	awards  []content.Award
 }
@@ -81,7 +89,7 @@ func (p projectDetail) Chrome() Chrome {
 	return Chrome{
 		Title:  p.project.Name,
 		Suffix: "project",
-		Crumbs: []string{"projects", p.project.Slug},
+		Crumbs: []string{p.root, p.project.Slug},
 	}
 }
 

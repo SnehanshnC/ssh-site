@@ -296,19 +296,42 @@ func TestParseProjects(t *testing.T) {
 	}
 }
 
+// TestProjectResolvesBySlug is the awards relation followed forward: an award
+// names the project it was won for, and the awards section opens that project's
+// own page. A slug no project carries resolves to nothing at all, which is what
+// lets a surface step around a reference the pack has yet to fix.
+func TestProjectResolvesBySlug(t *testing.T) {
+	pack := fixturePack(t)
+
+	project, ok := pack.Project("test-thing")
+	if !ok {
+		t.Fatal("the first project did not resolve by its own slug")
+	}
+	if got, want := project.Name, "Test Thing"; got != want {
+		t.Errorf("resolved %q, want %q", got, want)
+	}
+	if _, ok := pack.Project("no-such-thing"); ok {
+		t.Error("a slug no project carries resolved to a project")
+	}
+	if _, ok := pack.Project(""); ok {
+		t.Error("the empty slug resolved to a project")
+	}
+
+	// The two ends of the same relation: the fixture's orphan award names a
+	// project the list does not carry, and its unattached one names none.
+	for _, award := range pack.Awards {
+		_, resolved := pack.Project(award.Project)
+		if want := award.Slug != "orphan-award" && award.Slug != "unattached-award"; resolved != want {
+			t.Errorf("%s resolved to %v, want %v", award.Slug, resolved, want)
+		}
+	}
+}
+
 // TestAwardsForResolvesBySlug. The awards list is flat and names the project it
 // belongs to, so the relation is a lookup rather than a nesting - and it is
 // written once here because two sections read it from opposite ends.
 func TestAwardsForResolvesBySlug(t *testing.T) {
-	b, err := os.ReadFile(filepath.Join("testdata", "projects.yaml"))
-	if err != nil {
-		t.Fatalf("read testdata fixture: %v", err)
-	}
-	doc, err := parseProjects(b)
-	if err != nil {
-		t.Fatalf("parseProjects: %v", err)
-	}
-	pack := &Pack{Projects: doc.Projects, Awards: doc.Awards, Programs: doc.Programs}
+	pack := fixturePack(t)
 
 	got := pack.AwardsFor("test-thing")
 	if len(got) != 2 {
@@ -335,4 +358,21 @@ func TestAwardsForResolvesBySlug(t *testing.T) {
 	if got := pack.AwardsFor(""); got != nil {
 		t.Errorf("the empty slug resolved %+v", got)
 	}
+}
+
+// fixturePack is the projects fixture as a Pack, for the two lookups that read
+// its lists rather than its parsing. It is the fixture rather than the fetched
+// pack for the same reason every parser test here is: the fetched pack is
+// gitignored and only present after `make content`.
+func fixturePack(t *testing.T) *Pack {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join("testdata", "projects.yaml"))
+	if err != nil {
+		t.Fatalf("read testdata fixture: %v", err)
+	}
+	doc, err := parseProjects(b)
+	if err != nil {
+		t.Fatalf("parseProjects: %v", err)
+	}
+	return &Pack{Projects: doc.Projects, Awards: doc.Awards, Programs: doc.Programs}
 }
