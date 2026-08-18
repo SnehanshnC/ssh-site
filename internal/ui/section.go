@@ -17,12 +17,12 @@ import (
 // generically so that it shows real facts rather than invented ones while it
 // stands in for them.
 //
-// Work, projects and awards have already gone: openSection routes `w`, `p` and
-// `a` to the typed pages in work.go, projects.go and awards.go and this file
-// lost its rows for them, which is the trade each section slice makes. When the
-// last of the two lands, this file goes with it - the generic pack reading
-// above all, which exists only because a section that no slice has typed yet
-// has no shape to read it into.
+// Work, projects, awards and links have already gone: openSection routes `w`,
+// `p`, `a` and `l` to the typed pages in work.go, projects.go, awards.go and
+// links.go, and this file lost its rows for them, which is the trade each
+// section slice makes. When hobbies lands too, this file goes with it - the
+// generic pack reading above all, which exists only because a section that no
+// slice has typed yet has no shape to read it into.
 
 // section is one destination the card's nav row and the letter jumps open.
 type section struct {
@@ -35,7 +35,6 @@ type section struct {
 }
 
 var stubSections = []section{
-	{"l", "links", "links", "links", "link", "links"},
 	{"h", "hobbies", "hobbies", "hobbies", "hobby", "hobbies"},
 }
 

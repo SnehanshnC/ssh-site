@@ -48,6 +48,7 @@ var typedSections = map[string]func(*content.Pack) Page{
 	"w": openWork,
 	"p": openProjects,
 	"a": openAwards,
+	"l": openLinks,
 }
 
 var jumpKeys = func() map[string]bool {
