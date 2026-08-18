@@ -17,8 +17,10 @@ import (
 	"charm.land/wish/v2"
 	"charm.land/wish/v2/bubbletea"
 	"charm.land/wish/v2/logging"
+	"charm.land/wish/v2/ratelimiter"
 	recovermw "charm.land/wish/v2/recover"
 	"github.com/charmbracelet/colorprofile"
+	"golang.org/x/time/rate"
 
 	"github.com/SnehanshnC/ssh-site/internal/art"
 	"github.com/SnehanshnC/ssh-site/internal/capability"
@@ -30,11 +32,25 @@ const (
 	defaultHost = "localhost"
 	defaultPort = "2222"
 
-	hostKeyPath = ".ssh/ssh_site_ed25519"
+	// The box's own copy overrides this via SSH_SITE_HOST_KEY_PATH to
+	// /var/lib/ssh-site/host_ed25519 (D5): generated once, outside the build
+	// tree, so a redeploy never regenerates it. This default stays a
+	// build-tree-relative path because it only ever runs against a working
+	// copy of the repo in local dev.
+	defaultHostKeyPath = ".ssh/ssh_site_ed25519"
 
 	idleTimeout   = 15 * time.Minute
 	maxTimeout    = 1 * time.Hour
 	shutdownGrace = 30 * time.Second
+
+	// Session-level backstop only - nftables on the box is what actually
+	// stops a handshake flood, since this middleware only runs after a
+	// session channel opens. Values from research/09-server-hardening.md's
+	// recommended baseline: ~1 new session/sec sustained per source IP, a
+	// burst of 5, bounding the LRU to 10k tracked IPs.
+	rateLimit      = rate.Limit(1)
+	rateLimitBurst = 5
+	rateLimitLRU   = 10_000
 )
 
 func main() {
@@ -46,6 +62,7 @@ func main() {
 
 	host := envOrDefault("SSH_SITE_HOST", defaultHost)
 	port := envOrDefault("SSH_SITE_PORT", defaultPort)
+	hostKeyPath := envOrDefault("SSH_SITE_HOST_KEY_PATH", defaultHostKeyPath)
 
 	// Every session is placed on a rung of the render ladder before its first
 	// frame, from the environment it arrived with: TERM out of the pty-req,
@@ -83,12 +100,19 @@ func main() {
 		wish.WithMaxTimeout(maxTimeout),
 		wish.WithMiddleware(
 			// Middlewares compose from first to last, so the last one here
-			// (logging) runs first, calling into the recover-guarded chain
-			// (the PTY router, then bubbletea) as its "next".
+			// (logging) runs first, calling into the rate limiter, then the
+			// recover-guarded chain (the PTY router, then bubbletea) as its
+			// "next".
 			recovermw.Middleware(
 				bubbletea.MiddlewareWithProgramHandler(programHandler),
 				documentRouter(pack), // D2: routes a session with no active PTY to the document instead of rejecting it.
 			),
+			// A session-scoped backstop, not the real defense: it only fires
+			// after a session channel is already open, so it throttles repeat
+			// sessions from one IP rather than the handshake cost of a raw
+			// connection flood. nftables on the box (deploy/nftables.conf) is
+			// what actually stops that.
+			ratelimiter.Middleware(ratelimiter.NewRateLimiter(rateLimit, rateLimitBurst, rateLimitLRU)),
 			logging.Middleware(),
 		),
 	)

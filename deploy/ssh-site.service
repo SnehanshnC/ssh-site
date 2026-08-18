@@ -1,0 +1,39 @@
+# systemd unit for the app server (port 22).
+#
+# Installed by scripts/deploy.sh to /etc/systemd/system/ssh-site.service.
+# Port 22 is privileged, so the process does not run as root: a dedicated
+# system user (created by deploy.sh) runs it, and AmbientCapabilities grants
+# just enough - CAP_NET_BIND_SERVICE - to bind that one port.
+[Unit]
+Description=ssh-site portfolio SSH server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ssh-site
+Group=ssh-site
+WorkingDirectory=/var/lib/ssh-site
+ExecStart=/opt/ssh-site/ssh-site
+Environment=SSH_SITE_HOST=0.0.0.0
+Environment=SSH_SITE_PORT=22
+Environment=SSH_SITE_HOST_KEY_PATH=/var/lib/ssh-site/host_ed25519
+
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

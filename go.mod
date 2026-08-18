@@ -9,6 +9,8 @@ require (
 	charm.land/wish/v2 v2.0.3
 	github.com/charmbracelet/colorprofile v0.4.3
 	github.com/mattn/go-runewidth v0.0.24
+	golang.org/x/crypto v0.54.0
+	golang.org/x/time v0.15.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -27,12 +29,12 @@ require (
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/creack/pty v1.1.24 // indirect
 	github.com/go-logfmt/logfmt v0.6.1 // indirect
+	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/lucasb-eyer/go-colorful v1.4.1 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/pires/go-proxyproto v0.12.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
-	golang.org/x/crypto v0.54.0 // indirect
 	golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
