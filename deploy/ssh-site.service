@@ -18,6 +18,7 @@ ExecStart=/opt/ssh-site/ssh-site
 Environment=SSH_SITE_HOST=0.0.0.0
 Environment=SSH_SITE_PORT=22
 Environment=SSH_SITE_HOST_KEY_PATH=/var/lib/ssh-site/host_ed25519
+Environment=SSH_SITE_ANALYTICS_PATH=/var/lib/ssh-site/analytics.json
 
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE
@@ -31,6 +32,13 @@ ProtectKernelModules=yes
 ProtectControlGroups=yes
 RestrictSUIDSGID=yes
 LockPersonality=yes
+
+# ProtectSystem=strict makes everything outside of what's listed here
+# read-only, including /var/lib itself - the analytics counters (D7) need
+# somewhere to persist across a restart, and /var/lib/ssh-site is already
+# where the host key lives and is already owned ssh-site:ssh-site 750
+# (deploy.sh creates it), so it costs nothing new to grant.
+ReadWritePaths=/var/lib/ssh-site
 
 Restart=on-failure
 RestartSec=5s

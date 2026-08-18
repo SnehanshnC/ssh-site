@@ -22,6 +22,7 @@ import (
 	"github.com/charmbracelet/colorprofile"
 	"golang.org/x/time/rate"
 
+	"github.com/SnehanshnC/ssh-site/internal/analytics"
 	"github.com/SnehanshnC/ssh-site/internal/art"
 	"github.com/SnehanshnC/ssh-site/internal/capability"
 	"github.com/SnehanshnC/ssh-site/internal/content"
@@ -38,6 +39,13 @@ const (
 	// build-tree-relative path because it only ever runs against a working
 	// copy of the repo in local dev.
 	defaultHostKeyPath = ".ssh/ssh_site_ed25519"
+
+	// The box's own copy overrides this via SSH_SITE_ANALYTICS_PATH to
+	// /var/lib/ssh-site/analytics.json (D7), the same directory the host key
+	// lives in and for the same reason: outside the build tree, so a
+	// redeploy never resets it. Readable only over the admin sshd - the app
+	// never serves it back over port 22.
+	defaultAnalyticsPath = ".ssh/analytics.json"
 
 	idleTimeout   = 15 * time.Minute
 	maxTimeout    = 1 * time.Hour
@@ -63,6 +71,15 @@ func main() {
 	host := envOrDefault("SSH_SITE_HOST", defaultHost)
 	port := envOrDefault("SSH_SITE_PORT", defaultPort)
 	hostKeyPath := envOrDefault("SSH_SITE_HOST_KEY_PATH", defaultHostKeyPath)
+	analyticsPath := envOrDefault("SSH_SITE_ANALYTICS_PATH", defaultAnalyticsPath)
+
+	// A corrupt or unreadable analytics file is worth logging but never
+	// worth refusing a visitor over - stats starts from zero either way and
+	// the next successful write repairs the file on disk.
+	stats, err := analytics.Open(analyticsPath)
+	if err != nil {
+		log.Error("could not load analytics state; starting from zero", "error", err)
+	}
 
 	// Every session is placed on a rung of the render ladder before its first
 	// frame, from the environment it arrived with: TERM out of the pty-req,
@@ -85,6 +102,9 @@ func main() {
 		tier := sessionTier(sess)
 		log.Info("session tier", "tier", tier, "term", pty.Term,
 			"remote", sess.RemoteAddr().String())
+		if err := stats.RecordTier(tier); err != nil {
+			log.Error("could not record analytics", "error", err)
+		}
 
 		m := ui.New(pack, tier, pty.Window.Width, pty.Window.Height)
 		// Appended after MakeOptions so it is the last writer of the profile.
@@ -105,7 +125,7 @@ func main() {
 			// "next".
 			recovermw.Middleware(
 				bubbletea.MiddlewareWithProgramHandler(programHandler),
-				documentRouter(pack), // D2: routes a session with no active PTY to the document instead of rejecting it.
+				documentRouter(pack, stats), // D2: routes a session with no active PTY to the document instead of rejecting it.
 			),
 			// A session-scoped backstop, not the real defense: it only fires
 			// after a session channel is already open, so it throttles repeat
@@ -181,12 +201,20 @@ func colorProfile(tier art.Tier) colorprofile.Profile {
 // close - and it runs inside the same recover-guarded, logged middleware
 // chain as everything else, so the server's IdleTimeout and MaxTimeout still
 // apply to it exactly as they do to an interactive session.
-func documentRouter(pack *content.Pack) wish.Middleware {
+//
+// It is also D7's other counting site: a piped session never reaches
+// programHandler, so it never picks a render tier, but it is still a visit -
+// stats.RecordSession counts it without touching the tier histogram, which
+// has nowhere to put a session that never had a terminal to detect.
+func documentRouter(pack *content.Pack, stats *analytics.Store) wish.Middleware {
 	return func(next ssh.Handler) ssh.Handler {
 		return func(sess ssh.Session) {
 			if _, _, active := sess.Pty(); active {
 				next(sess)
 				return
+			}
+			if err := stats.RecordSession(); err != nil {
+				log.Error("could not record analytics", "error", err)
 			}
 			_, _ = wish.WriteString(sess, ui.Document(pack))
 			_ = sess.Exit(0)

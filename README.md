@@ -125,6 +125,12 @@ What either script built - the IP, the admin port, where the key and the
 DuckDNS token live - is recorded outside this repo. None of that is ever
 committed here.
 
+## Analytics
+
+The app server keeps Wish's structured session log, plus a session counter and a render-tier histogram - enough to know the site is being visited and which rung of the render ladder real visitors actually land on, and nothing more.
+
+No third-party analytics service is ever contacted, and no visitor-identifying data is stored beyond whatever journald already keeps by default. The counters persist to a file under `/var/lib/ssh-site`, owned by the unprivileged `ssh-site` user, and survive a service restart. The app never serves them back over port 22: reading them means logging into the box over the admin sshd, where `sudo cat` is needed since the app itself has no admin concept.
+
 ## Staying current with the content pack
 
 [.github/workflows/pack-propagation.yml](.github/workflows/pack-propagation.yml)
