@@ -16,14 +16,24 @@ Then, from another terminal:
 ssh -p 2222 localhost
 ```
 
-Press `q` to quit.
+## Getting around
 
-The arrival screen is a banner-topped profile card: the wordmark across the top,
-a photographic portrait in a Braille-dot ring on the left, and the facts on the
-right. It wants 78 columns by 24 rows to be pixel-correct, shortens its rules
-between 71 and 77, restacks vertically below that, and asks to be made bigger
-below 58 columns or 20 rows. No link is ever truncated to fit - the card changes
-shape instead.
+The arrival screen is a banner-topped profile card: the wordmark across the top, a photographic portrait in a Braille-dot ring on the left, the facts on the right, and a live nav row along the bottom.
+Opening a section pushes a full-screen page onto a stack, and going back pops it.
+
+| Key | Does |
+| --- | --- |
+| arrows, `tab` | move the highlight along the nav row |
+| `enter` | open whatever the highlight is on |
+| `esc`, `backspace` | back one level, until the card is back |
+| `w` `p` `a` `l` `h` | jump straight to work, projects, awards, links or hobbies |
+| up/down, pgup/pgdn, home/end, `space` | move a cursor or scroll, by page |
+| `?` | the whole key list |
+| `q`, `ctrl+c` | quit |
+
+One column of every width is held back for chrome before any art is fitted, so the card wants 79 columns by 23 rows to be pixel-correct.
+It shortens its rules between 72 and 78 columns, restacks vertically below that, and asks to be made bigger below 58 columns or 20 rows.
+No link is ever truncated to fit: the card changes shape instead.
 
 ## Content
 

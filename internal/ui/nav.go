@@ -29,9 +29,18 @@ const (
 	navNarrowGap = 2
 )
 
-func navRow(items []navItem, gap int) string {
+// navRow renders the legend with one item live. It is the signed-off row
+// unchanged - the same items, the same key colour, the same gaps, so the row
+// keeps its width and the card keeps its geometry - with a ground painted under
+// whichever item the visitor is on. A live index outside the row highlights
+// nothing, which is the static legend the card arrived with.
+func navRow(items []navItem, gap, live int) string {
 	parts := make([]string, len(items))
 	for i, item := range items {
+		if i == live {
+			parts[i] = paint(liveState, "["+item.key+"] "+item.label)
+			continue
+		}
 		parts[i] = paint(keyState, "["+item.key+"]") + " " + paint(textState, item.label)
 	}
 	return strings.Join(parts, strings.Repeat(" ", gap))

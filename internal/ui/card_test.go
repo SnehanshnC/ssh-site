@@ -46,23 +46,27 @@ func realPack(t *testing.T) *content.Pack {
 }
 
 // TestCardMatchesTheReferenceGeometry checks the card against the layout
-// ticket 04 signed off: banner rows 0-3 centred on the frame, the disc at
-// column 2 under it, the copy column at 42, the rule on row 22 running from the
-// disc's own left edge to where the copy column's rule ends, and the nav on
-// row 23.
+// ticket 04 signed off, as the navigation shell left it: banner rows 0-3
+// centred on the frame, the disc at column 2 under it, the copy column at 42,
+// and the live nav row on row 22, where the static rule and the static legend
+// used to be.
+//
+// The card is centred on 79 columns rather than 80 because one column is
+// reserved for right-edge chrome at every width before any art is fitted, so an
+// 80-column terminal offers the composition 79.
 //
 // It is geometry rather than bytes because the four cosmetic touch-ups the
 // build was asked to make - the banner's row gaps, the earring, the temple
 // wedge, the collar step - all change pixels of the reference on purpose. What
 // must not move is where anything sits.
 func TestCardMatchesTheReferenceGeometry(t *testing.T) {
-	rows := plainRows(Card(realPack(t), 80, 24))
+	rows := plainRows(Card(realPack(t), 80, 24, noHighlight))
 	if len(rows) != 24 {
 		t.Fatalf("card is %d rows, want 24", len(rows))
 	}
 
 	for row := range art.BannerRows {
-		assertInk(t, rows, row, 17, 62) // 46 columns centred on 80
+		assertInk(t, rows, row, 16, 61) // 46 columns centred on 79
 	}
 	for row := faceRow; row < faceRow+art.WidePortraitRows; row++ {
 		if first, _ := ink(rows[row]); first < faceCol {
@@ -70,9 +74,8 @@ func TestCardMatchesTheReferenceGeometry(t *testing.T) {
 				row, first, faceCol)
 		}
 	}
-	assertInk(t, rows, ruleRow, faceCol, copyCol+copyRule-1)
-	if got := strings.TrimSpace(rows[ruleRow]); got != strings.Repeat("─", 76) {
-		t.Errorf("row %d is %q, want a 76-column rule", ruleRow, got)
+	if got := strings.Count(rows[faceRow+ruleOffset], "─"); got != copyRule {
+		t.Errorf("the copy column's rule is %d wide, want %d", got, copyRule)
 	}
 
 	// The copy column starts where the reference puts it, on every row it uses.
@@ -86,14 +89,20 @@ func TestCardMatchesTheReferenceGeometry(t *testing.T) {
 		}
 	}
 
-	nav := rows[legendRow]
+	nav := rows[liveRow]
 	for _, item := range navFull {
 		if !strings.Contains(nav, "["+item.key+"] "+item.label) {
 			t.Errorf("nav row %q is missing %q", nav, item.label)
 		}
 	}
-	if first, last := ink(nav); first != 5 || last != 74 {
-		t.Errorf("nav spans columns %d..%d, want 5..74", first, last)
+	if first, last := ink(nav); first != 4 || last != 73 {
+		t.Errorf("nav spans columns %d..%d, want 4..73", first, last)
+	}
+
+	// Nothing above the nav row is the card's own bottom edge any more: the
+	// static rule that used to close the card off went with the static legend.
+	if row := rows[liveRow-1]; strings.Contains(row, strings.Repeat("─", 8)) {
+		t.Errorf("row %d still carries the card's old bottom rule", liveRow-1)
 	}
 }
 
@@ -102,7 +111,7 @@ func TestCardMatchesTheReferenceGeometry(t *testing.T) {
 // cell's state is resolved and re-emitted canonically, and megabytes when SGR
 // prefixes are carried forward by concatenation instead.
 func TestScreenIsKilobytesNotMegabytes(t *testing.T) {
-	size := len(Card(realPack(t), 80, 24))
+	size := len(Card(realPack(t), 80, 24, noHighlight))
 	if size < 8*1024 || size > 32*1024 {
 		t.Errorf("a composed screen is %d bytes, want it on the order of 18 KB", size)
 	}
@@ -112,7 +121,7 @@ func TestScreenIsKilobytesNotMegabytes(t *testing.T) {
 // actually matters - the bytes a visitor's terminal receives.
 func TestEverySequenceNamesBothColours(t *testing.T) {
 	sgr := regexp.MustCompile("\x1b\\[([0-9;]*)m")
-	for _, match := range sgr.FindAllStringSubmatch(Card(realPack(t), 80, 24), -1) {
+	for _, match := range sgr.FindAllStringSubmatch(Card(realPack(t), 80, 24, noHighlight), -1) {
 		params := match[1]
 		if params == "0" || params == "" {
 			continue
@@ -133,23 +142,28 @@ func TestFitsEveryTerminalSize(t *testing.T) {
 	pack := fixturePack()
 	for width := 1; width <= 200; width++ {
 		for _, height := range []int{1, 5, 19, 20, 23, 24, 25, 40, 60} {
-			card := Card(pack, width, height)
+			card := Card(pack, width, height, noHighlight)
 			rows := plainRows(card)
 			if len(rows) != height {
 				t.Fatalf("%dx%d: %d rows, want %d", width, height, len(rows), height)
 			}
 			for i, row := range rows {
-				if got := ansi.Width(row); got > width {
-					t.Fatalf("%dx%d: row %d is %d columns wide", width, height, i, got)
+				// One column short of the frame, not level with it: the chrome
+				// column is reserved before the art is fitted, at every width.
+				if got := ansi.Width(row); got > width-chromeCol {
+					t.Fatalf("%dx%d: row %d is %d columns wide, over the %d the art gets",
+						width, height, i, got, width-chromeCol)
 				}
 			}
 		}
 	}
 }
 
-// TestResponsiveLadder walks the widths the responsive rule names. The card is
-// pixel-correct from 78 columns; between 71 and 77 the rules shorten, which is
-// a parameter rather than a change to the art; below that it restacks.
+// TestResponsiveLadder walks the widths the responsive rule names, each one
+// column wider than the art budget it names because of the reserved chrome
+// column: the card is pixel-correct from 79 terminal columns; between 72 and 78
+// the copy column's rule shortens, which is a parameter rather than a change to
+// the art; below that it restacks.
 func TestResponsiveLadder(t *testing.T) {
 	pack := fixturePack()
 	tests := []struct {
@@ -157,38 +171,40 @@ func TestResponsiveLadder(t *testing.T) {
 		layout string
 		rule   int
 	}{
-		{200, "wide", 76}, {80, "wide", 76}, {78, "wide", 76},
-		{77, "wide", 75}, {74, "wide", 72}, {71, "wide", 69},
-		{70, "narrow", 0}, {60, "narrow", 0}, {58, "narrow", 0},
+		{200, "wide", 36}, {80, "wide", 36}, {79, "wide", 36},
+		{78, "wide", 35}, {75, "wide", 32}, {72, "wide", 29},
+		{71, "narrow", 0}, {60, "narrow", 0}, {58, "narrow", 0},
 		{57, "plea", 0},
 	}
 	for _, tt := range tests {
-		rows := plainRows(Card(pack, tt.width, 24))
+		rows := plainRows(Card(pack, tt.width, 24, noHighlight))
 		if got := layoutOf(rows); got != tt.layout {
 			t.Errorf("%d columns: drew the %s layout, want %s", tt.width, got, tt.layout)
 		}
 		if tt.rule == 0 {
 			continue
 		}
-		if got := strings.Count(rows[ruleRow], "─"); got != tt.rule {
-			t.Errorf("%d columns: bottom rule is %d wide, want %d",
+		if got := strings.Count(rows[faceRow+ruleOffset], "─"); got != tt.rule {
+			t.Errorf("%d columns: the copy column's rule is %d wide, want %d",
 				tt.width, got, tt.rule)
 		}
 	}
 }
 
-// TestHeightLadder: below 24 rows there is no portrait that fits, so the card
-// drops the art rather than the facts, and below the spec's floor it asks to be
-// made bigger rather than showing a broken screen.
+// TestHeightLadder: below 23 rows - the composition's height now that its
+// bottom two rows are one live nav row - there is no portrait that fits, so the
+// card drops the art rather than the facts, and below the spec's floor it asks
+// to be made bigger rather than showing a broken screen.
 func TestHeightLadder(t *testing.T) {
 	pack := fixturePack()
 	for _, tt := range []struct {
 		height int
 		want   string
 	}{
-		{40, "wide"}, {24, "wide"}, {23, "compact"}, {20, "compact"}, {19, "plea"},
+		{40, "wide"}, {24, "wide"}, {23, "wide"}, {22, "compact"}, {20, "compact"},
+		{19, "plea"},
 	} {
-		if got := layoutOf(plainRows(Card(pack, 80, tt.height))); got != tt.want {
+		if got := layoutOf(plainRows(Card(pack, 80, tt.height, noHighlight))); got != tt.want {
 			t.Errorf("%d rows: drew the %s layout, want %s", tt.height, got, tt.want)
 		}
 	}
@@ -207,7 +223,7 @@ func TestLinksAreNeverTruncated(t *testing.T) {
 
 	found := 0
 	for width := 1; width <= 200; width++ {
-		for _, row := range plainRows(Card(pack, width, 24)) {
+		for _, row := range plainRows(Card(pack, width, 24, noHighlight)) {
 			for _, field := range strings.Fields(row) {
 				if !strings.Contains(field, "test-person") {
 					continue
@@ -230,7 +246,7 @@ func TestLinksAreNeverTruncated(t *testing.T) {
 // pack says arrives on the screen.
 func TestCopyComesFromThePack(t *testing.T) {
 	pack := fixturePack()
-	card := strings.Join(plainRows(Card(pack, 80, 24)), "\n")
+	card := strings.Join(plainRows(Card(pack, 80, 24, noHighlight)), "\n")
 	for _, want := range []string{
 		"Test Engineer",           // role title
 		"TestCo",                  // company
@@ -381,7 +397,7 @@ func layoutOf(rows []string) string {
 		return "wide"
 	case strings.Contains(joined, "[?] help"):
 		return "wide"
-	case strings.Contains(rows[min(legendRow, len(rows)-1)], "[q] quit"):
+	case strings.Contains(rows[min(liveRow, len(rows)-1)], "[q] quit"):
 		return "narrow"
 	default:
 		return "compact"
