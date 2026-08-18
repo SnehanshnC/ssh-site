@@ -15,7 +15,6 @@ import (
 	"charm.land/log/v2"
 	"charm.land/ssh"
 	"charm.land/wish/v2"
-	"charm.land/wish/v2/activeterm"
 	"charm.land/wish/v2/bubbletea"
 	"charm.land/wish/v2/logging"
 	recovermw "charm.land/wish/v2/recover"
@@ -77,10 +76,10 @@ func main() {
 		wish.WithMiddleware(
 			// Middlewares compose from first to last, so the last one here
 			// (logging) runs first, calling into the recover-guarded chain
-			// (activeterm, then bubbletea) as its "next".
+			// (the PTY router, then bubbletea) as its "next".
 			recovermw.Middleware(
 				bubbletea.MiddlewareWithProgramHandler(programHandler),
-				activeterm.Middleware(), // rejects sessions with no active PTY.
+				documentRouter(pack), // D2: routes a session with no active PTY to the document instead of rejecting it.
 			),
 			logging.Middleware(),
 		),
@@ -108,6 +107,30 @@ func main() {
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil && !errors.Is(err, ssh.ErrServerClosed) {
 		log.Error("could not stop server gracefully", "error", err)
+	}
+}
+
+// documentRouter is D2: a session with an active PTY is sent on to the
+// interactive program - this middleware's own next, wired up in main to the
+// bubbletea handler - while a session with none, `ssh ... | cat` chief among
+// them, gets the whole portfolio as ui.Document's plain-text document and
+// exits 0. It replaces the scaffold's activeterm middleware, which rejected
+// exactly the sessions this one now serves.
+//
+// Serving the document is cheap enough to do inline - render once, write,
+// close - and it runs inside the same recover-guarded, logged middleware
+// chain as everything else, so the server's IdleTimeout and MaxTimeout still
+// apply to it exactly as they do to an interactive session.
+func documentRouter(pack *content.Pack) wish.Middleware {
+	return func(next ssh.Handler) ssh.Handler {
+		return func(sess ssh.Session) {
+			if _, _, active := sess.Pty(); active {
+				next(sess)
+				return
+			}
+			_, _ = wish.WriteString(sess, ui.Document(pack))
+			_ = sess.Exit(0)
+		}
 	}
 }
 
