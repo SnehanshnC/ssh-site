@@ -30,6 +30,18 @@ type Model struct {
 	stack []frame
 	nav   int
 	help  bool
+
+	// quitting is set the moment any of q, ctrl+c, a page's own Quit action, or
+	// the idle timeout decide the session is over - see quit() in exit.go. It
+	// is what View switches on to draw the goodbye line instead of the chrome.
+	quitting bool
+
+	// idleGen counts keypresses. Every keypress schedules a fresh idleTick
+	// carrying the generation it was scheduled at; a tick whose generation does
+	// not match idleGen when it arrives was scheduled before some later
+	// keypress and is a stale check on a session that has not, in fact, sat
+	// idle - see key() and exit.go.
+	idleGen int
 }
 
 // sectionKeys are the letters that open a section from anywhere, in the order
@@ -73,9 +85,11 @@ func New(pack *content.Pack, width, height int) Model {
 	return Model{pack: pack, width: width, height: height}
 }
 
-// Init implements tea.Model. There is no initial command to run.
+// Init implements tea.Model. It starts the idle timer: arrival counts as
+// activity in every other sense, so the clock the visitor gets is the full
+// ten minutes, timed from the first frame rather than the first keypress.
 func (m Model) Init() tea.Cmd {
-	return nil
+	return idleTick(m.idleGen)
 }
 
 // Update implements tea.Model.
@@ -87,20 +101,42 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyPressMsg:
 		return m.key(msg.String())
+	case idleTickMsg:
+		if msg.gen != m.idleGen {
+			// Some later keypress has already scheduled its own tick; this one
+			// is checking on a session that is no longer the one it thinks it
+			// is idle-timing.
+			return m, nil
+		}
+		return m.quit()
 	}
 	return m, nil
 }
 
-// key routes one keypress.
+// key resets the idle timer against this keypress - any keypress counts, so
+// the reset happens here rather than deeper in route, which only some keys
+// reach - then routes the key and reschedules the next idle check, unless
+// routing just ended the session, in which case there is no session left to
+// time.
+func (m Model) key(key string) (tea.Model, tea.Cmd) {
+	m.idleGen++
+	next, cmd := m.route(key)
+	if next.(Model).quitting {
+		return next, cmd
+	}
+	return next, tea.Batch(cmd, idleTick(m.idleGen))
+}
+
+// route sends one keypress to whatever it means.
 //
 // The shell claims a key before any page sees it only where it has made a
 // promise that holds everywhere: quit, help, and the letter jumps. Everything
 // else is offered to the open page first, and a page that returns Ignored hands
 // it back for the shell's own default.
-func (m Model) key(key string) (tea.Model, tea.Cmd) {
+func (m Model) route(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "q", "ctrl+c":
-		return m, tea.Quit
+		return m.quit()
 	}
 	if m.help {
 		if helpKeys[key] {
@@ -163,7 +199,7 @@ func (m Model) cardKey(key string) (tea.Model, tea.Cmd) {
 func (m Model) open(item navItem) (tea.Model, tea.Cmd) {
 	switch item.key {
 	case "q":
-		return m, tea.Quit
+		return m.quit()
 	case "?":
 		m.help = true
 		return m, nil
@@ -191,7 +227,7 @@ func (m Model) pageKey(key string) (tea.Model, tea.Cmd) {
 	case Pop:
 		return m.pop(), nil
 	case Quit:
-		return m, tea.Quit
+		return m.quit()
 	}
 
 	switch key {
@@ -283,9 +319,19 @@ func (m *Model) resettle() {
 	}
 }
 
-// View implements tea.Model.
+// View implements tea.Model. Every screen but one draws into the alt screen,
+// the full-window mode the page stack is specced against; the goodbye line is
+// the one exception; see quit() and goodbye() in exit.go for why it draws
+// outside it instead.
 func (m Model) View() tea.View {
-	return tea.NewView(m.screen())
+	if m.quitting {
+		v := tea.NewView(goodbye(m.pack))
+		v.AltScreen = false
+		return v
+	}
+	v := tea.NewView(m.screen())
+	v.AltScreen = true
+	return v
 }
 
 func (m Model) screen() string {

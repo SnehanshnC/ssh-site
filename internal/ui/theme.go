@@ -48,10 +48,22 @@ func paint(state ansi.State, s string) string {
 	return state.Prefix() + s + "\x1b[0m"
 }
 
-// gradient paints text with the banner's horizontal ramp, spread over the
-// text's own width. Spaces are left unpainted: a gradient is only legible on
-// ink, and painting the gaps would put a background behind them.
-func gradient(text string) string {
+// gradient paints text bold, with the banner's horizontal ramp spread over
+// the text's own width - a page header's own colour, and every other place
+// this surface uses the ramp at full strength.
+func gradient(text string) string { return rampText(text, "1") }
+
+// dimGradient paints text with the same ramp, dimmed rather than bold. It is
+// the goodbye line's name: dim because that line prints after the session has
+// already ended, an afterthought in the visitor's scrollback rather than a
+// headline on screen.
+func dimGradient(text string) string { return rampText(text, "2") }
+
+// rampText spreads the banner's horizontal ramp over text's own width,
+// carrying attrs on every painted rune. Spaces are left unpainted: a gradient
+// is only legible on ink, and painting the gaps would put a background
+// behind them.
+func rampText(text, attrs string) string {
 	runes := []rune(text)
 	if len(runes) == 0 {
 		return ""
@@ -63,7 +75,7 @@ func gradient(text string) string {
 	for i, r := range runes {
 		state := ansi.State{}
 		if r != ' ' {
-			state = ansi.State{Attrs: "1", FG: ramp(float64(i) / float64(span))}
+			state = ansi.State{Attrs: attrs, FG: ramp(float64(i) / float64(span))}
 		}
 		if state != cur {
 			b.WriteString("\x1b[0m")
