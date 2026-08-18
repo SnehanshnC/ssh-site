@@ -63,6 +63,24 @@ The portraits and the wordmark are build-time assets, checked in under
 it builds from what is committed. See [art/README.md](art/README.md) for the
 pipeline, its prerequisites, and why the split is where it is.
 
+## The box
+
+The site will run on a free-tier VM: the app server on port 22, and the admin
+sshd moved to a high port so 22 is free for it.
+
+[scripts/provision-box.sh](scripts/provision-box.sh) builds that box. It walks
+the cloud console steps a human has to take, then does the machine work itself -
+keys, firewall rules on both sides, and moving sshd off port 22 in an order that
+proves the new port carries a session before it gives up the old one. Run it to
+build the box, and run it again to rebuild one from scratch.
+
+```sh
+bash scripts/provision-box.sh
+```
+
+What it built - the IP, the admin port, where the key and the DuckDNS token live -
+it records outside this repo. None of that is ever committed here.
+
 ## Planning
 
 Planning happens on a local wayfinder tracker kept out of this repo.
